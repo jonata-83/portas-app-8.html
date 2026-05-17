@@ -1,0 +1,22 @@
+{
+  "name": "Controle de Portas",
+  "short_name": "Portas",
+  "description": "Controle de portas",
+  "start_url": "/portas-app-8.html/",
+  "display": "standalone",
+  "background_color": "#111827",
+  "theme_color": "#1e3a8a",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "logo192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "logo512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
