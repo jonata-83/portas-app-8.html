@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Portas" />
+  <meta name="theme-color" content="#1e3a8a" />
+  <title>Controle de Portas</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { background: #111827; font-family: 'Segoe UI', system-ui, sans-serif; color-scheme: dark; }
+    input[type="date"] { color-scheme: dark; }
+    input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; }
+    #root { max-width: 480px; margin: 0 auto; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.6.0/jspdf.plugin.autotable.min.js"></script>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+const STORAGE_KEY = "portas-app-v5";
+
+function useLongPress(onLongPress, ms = 550) {
+  const timerRef = useRef(null);
+  const movedRef = useRef(false);
+  const start = () => { movedRef.current = false; timerRef.current = setTimeout(() => { if (!movedRef.current) onLongPress(); }, ms); };
+  const move = () => { movedRef.current = true; clear(); };
+  const clear = () => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; } };
+  return { onTouchStart: start, onTouchMove: move, onTouchEnd: clear, onTouchCancel: clear };
+}
+
+function EntryCard({ e, deleteConfirm, setDeleteConfirm, handleDelete, handleEdit, filterType, setFilterType, filterDoorName, setFilterDoorName }) {
+  const lastTap = useRef(0);
+  const [flash, setFlash] = useState(false);
+  const isConfirm = deleteConfirm === e.id;
+
+  const longPress = useLongPress(() => {
+    if (navigator.vibrate) navigator.vibrate(60);
+    setDeleteConfirm(e.id);
+  });
+
+  function handleTap() {
+    const now = Date.now();
+    if (now - lastTap.current < 320) {
+      setFlash(true);
+      setTimeout(() => setFlash(false), 300);
+      handleEdit(e);
+    }
+    lastTap.current = now;
+  }
+
+  return (
+    <div
+      {...longPress}
+      onTouchEnd={(ev) => { longPress.onTouchEnd(ev); handleTap(); }}
+      style={{
+        ...s.entryCard,
+        background: isConfirm ? "#2d1515" : flash ? "#1e3a5f" : "#1f2937",
+        transition: "background 0.2s",
+        userSelect: "none"
+      }}
+    >
+      <div style={s.entryLeft}>
+        {(e.type==="despesa") && (
+          <button style={{...s.emojiFilterBtn, ...(filterType===e.expType?s.emojiFilterActive:{})}}
+            onTouchStart={(ev)=>ev.stopPropagation()}
+            onTouchEnd={(ev)=>{ev.stopPropagation();setFilterType(filterType===e.expType?null:e.expType);}}>
+            {EXPENSE_TYPES.find(t=>t.id===e.expType)?.emoji||"💰"}
+          </button>
+        )}
+        <div style={{flex:1}}>
+          <div style={s.entryName}>
+            {e.type==="porta"||e.type==="janela" ? (
+              <>
+                <span style={{color:"#9ca3af",fontSize:13,fontWeight:700}}>{e.qtd||""} un</span>
+                {(e.nome||e.desc) && <span> · </span>}
+                {e.nome && (
+                  <span style={{...s.doorNameTag, ...(filterDoorName===e.nome?s.doorNameTagActive:{})}}
+                    onTouchStart={(ev)=>ev.stopPropagation()}
+                    onTouchEnd={(ev)=>{ev.stopPropagation();setFilterDoorName(filterDoorName===e.nome?null:e.nome);}}>
+                    {e.nome}
+                  </span>
+                )}
+              </>
+            ) : EXPENSE_TYPES.find(t=>t.id===e.expType)?.label}
+          </div>
+          {e.desc && <div style={s.entryDesc}>{e.desc}</div>}
+          <div style={s.entryDate}>{formatDate(e.date)}</div>
+        </div>
+      </div>
+      <div style={s.entryRight}>
+        <span style={{color:e.type==="porta"?"#22c55e":e.type==="janela"?"#60b4f7":"#ff6b6b", fontWeight:700, fontSize:15}}>
+          {e.type==="despesa"?"- ":"+ "}{formatBRL(e.valor)}
+        </span>
+        {isConfirm && (
+          <div style={s.delRow}>
+            <button style={s.btnDelOk}
+              onTouchStart={(ev)=>ev.stopPropagation()}
+              onTouchEnd={(ev)=>{ev.stopPropagation();handleDelete(e.id);}}>Excluir</button>
+            <button style={s.btnDelNo}
+              onTouchStart={(ev)=>ev.stopPropagation()}
+              onTouchEnd={(ev)=>{ev.stopPropagation();setDeleteConfirm(null);}}>Não</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EspecieCard({ esp, st, onOpen, onDelete, formatBRLInt, formatBRL }) {
+  const [confirmDel, setConfirmDel] = useState(false);
+  const movedRef = useRef(false);
+  const startY = useRef(0);
+
+  const longPress = useLongPress(() => {
+    if (navigator.vibrate) navigator.vibrate(60);
+    setConfirmDel(true);
+  });
+
+  if (confirmDel) return (
+    <div style={{...s.especieCard, background:"#2d1515"}}>
+      <div style={{color:"#fca5a5",fontWeight:700,fontSize:15,marginBottom:12}}>Excluir <strong>{esp}</strong> e todos os lançamentos?</div>
+      <div style={{display:"flex",gap:10}}>
+        <button style={{...s.btnDelOk, flex:1, padding:"10px", fontSize:14, borderRadius:10}}
+          onTouchStart={(ev)=>ev.stopPropagation()} onClick={onDelete}>Excluir tudo</button>
+        <button style={{...s.btnDelNo, flex:1, padding:"10px", fontSize:14, borderRadius:10}}
+          onTouchStart={(ev)=>ev.stopPropagation()} onClick={()=>setConfirmDel(false)}>Cancelar</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div
+      {...longPress}
+      onTouchStart={(ev) => { longPress.onTouchStart(ev); movedRef.current = false; startY.current = ev.touches[0].clientY; }}
+      onTouchMove={(ev) => { longPress.onTouchMove(ev); if (Math.abs(ev.touches[0].clientY - startY.current) > 8) movedRef.current = true; }}
+      onTouchEnd={(ev) => { longPress.onTouchEnd(ev); if (!movedRef.current) onOpen(); }}
+      style={s.especieCard}
+    >
+      <div style={s.cardTop}>
+        <span style={s.cardName}>{esp}</span>
+        <span style={{...s.cardLucroVal, color:st.lucro>=0?"#22c55e":"#ff6b6b"}}>{st.lucro>=0?"↑":"↓"} {formatBRLInt(Math.abs(st.lucro))} ›</span>
+      </div>
+      <div style={s.cardStatsRow}>
+        <div style={s.cardStatCol}>
+          <span style={s.cardStatLabel}>💸 Despesas</span>
+          <span style={{...s.cardStatVal, color:"#ff6b6b"}}>{formatBRLInt(st.desp)}</span>
+        </div>
+        <div style={s.cardStatDivider}/>
+        <div style={s.cardStatCol}>
+          <span style={s.cardStatLabel}>🚪 Portas</span>
+          {st.qtdPort>0 && <span style={s.cardStatQtd}>{st.qtdPort} un</span>}
+          <span style={{...s.cardStatVal, color:"#22c55e"}}>{formatBRLInt(st.port)}</span>
+        </div>
+        {st.jan>0 && <><div style={s.cardStatDivider}/><div style={s.cardStatCol}>
+          <span style={s.cardStatLabel}>🪟 Janelas</span>
+          {st.qtdJan>0 && <span style={s.cardStatQtd}>{st.qtdJan} un</span>}
+          <span style={{...s.cardStatVal, color:"#60b4f7"}}>{formatBRLInt(st.jan)}</span>
+        </div></>}
+      </div>
+    </div>
+  );
+}
+
+const THEME_KEY = "portas-theme-v1";
+const THEMES = [
+  { id:"blue",    label:"Azul",     a:"#1e3a8a", b:"#3730a3" },
+  { id:"purple",  label:"Roxo",     a:"#4a1d96", b:"#6d28d9" },
+  { id:"teal",    label:"Verde",    a:"#065f46", b:"#047857" },
+  { id:"red",     label:"Vermelho", a:"#7f1d1d", b:"#b91c1c" },
+  { id:"orange",  label:"Laranja",  a:"#7c2d12", b:"#c2410c" },
+  { id:"slate",   label:"Cinza",    a:"#1e293b", b:"#334155" },
+  { id:"pink",    label:"Rosa",     a:"#831843", b:"#be185d" },
+  { id:"indigo",  label:"Anil",     a:"#312e81", b:"#4338ca" },
+  { id:"navy",    label:"Navy",     a:"#0f172a", b:"#1e3a8a" },
+  { id:"carbon",  label:"Carbon",   a:"#0a0a0a", b:"#1c1c1c" },
+  { id:"forest",  label:"Floresta", a:"#052e16", b:"#14532d" },
+  { id:"wine",    label:"Vinho",    a:"#4a0010", b:"#881337" },
+  { id:"ocean",   label:"Oceano",   a:"#0c1445", b:"#1e3a8a" },
+  { id:"copper",  label:"Cobre",    a:"#431407", b:"#7c2d12" },
+];
+
+const EXPENSE_TYPES = [
+  { id: "tora", label: "Compra de Tora", emoji: "🪵" },
+  { id: "serragem", label: "Serragem", emoji: "🪚" },
+  { id: "madeira", label: "Madeira Serrada", emoji: "📦" },
+  { id: "outro", label: "Outro", emoji: "➕" },
+];
+
+function formatBRLInt(val) {
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(val || 0);
+}
+function formatBRL(val) {
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(val || 0);
+}
+function formatShortNum(val) {
+  const v = val || 0;
+  if (v === 0) return "0";
+  if (Math.abs(v) >= 1000000) return `${(v / 1000000).toLocaleString("pt-BR", { minimumFractionDigits: v % 1000000 === 0 ? 0 : 1, maximumFractionDigits: 1 })} mi`;
+  if (Math.abs(v) >= 1000) return `${(v / 1000).toLocaleString("pt-BR", { minimumFractionDigits: v % 1000 === 0 ? 0 : 1, maximumFractionDigits: 1 })} mil`;
+  return new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+}
+function formatShort(val) {
+  const v = val || 0;
+  if (v === 0) return "R$ 0";
+  if (Math.abs(v) >= 1000000) return `R$ ${(v / 1000000).toLocaleString("pt-BR", { minimumFractionDigits: v % 1000000 === 0 ? 0 : 1, maximumFractionDigits: 1 })} mi`;
+  if (Math.abs(v) >= 1000) return `R$ ${(v / 1000).toLocaleString("pt-BR", { minimumFractionDigits: v % 1000 === 0 ? 0 : 1, maximumFractionDigits: 1 })} mil`;
+  return formatBRL(v);
+}
+function today() { return new Date().toISOString().slice(0, 10); }
+function formatDate(d) {
+  if (!d) return "";
+  const [y, m, day] = d.split("-");
+  return `${day}/${m}/${y}`;
+}
+
+const storage = {
+  get: (key) => {
+    try { const v = localStorage.getItem(key); return v ? { value: v } : null; } catch { return null; }
+  },
+  set: (key, value) => {
+    try { localStorage.setItem(key, value); return true; } catch { return null; }
+  }
+};
+
+function App() {
+  const [data, setData] = useState({ entries: [] });
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState("list");
+  const [mainTab, setMainTab] = useState("especies");
+  const [especieAtiva, setEspecieAtiva] = useState(null);
+  const [subTab, setSubTab] = useState("despesas");
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [saved, setSaved] = useState(false);
+  const [form, setForm] = useState({ type: "despesa", expType: "tora", especie: "", nome: "", desc: "", valor: "", qtd: "", valorUnit: "", m3: "", vrM3: "", date: today() });
+  const [theme, setTheme] = useState(THEMES[0]);
+  const [headerVisible, setHeaderVisible] = useState(true);
+  const lastScrollY = useRef(0);
+  const [showThemePicker, setShowThemePicker] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [filterType, setFilterType] = useState(null);
+  const [filterDoorName, setFilterDoorName] = useState(null);
+  const [renamingEspecie, setRenamingEspecie] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+
+  useEffect(() => {
+    try {
+      const r = storage.get(STORAGE_KEY);
+      if (r?.value) setData(JSON.parse(r.value));
+      const t = storage.get(THEME_KEY);
+      if (t?.value) { const found = THEMES.find(th=>th.id===t.value); if(found) setTheme(found); }
+    } catch {}
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentY = window.scrollY;
+      if (currentY < 10) { setHeaderVisible(true); }
+      else if (currentY < lastScrollY.current) { setHeaderVisible(true); }
+      else if (currentY > lastScrollY.current + 5) { setHeaderVisible(false); setShowThemePicker(false); }
+      lastScrollY.current = currentY;
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  function persist(newData) {
+    setData(newData);
+    try { storage.set(STORAGE_KEY, JSON.stringify(newData)); } catch {}
+  }
+
+  function exportPDF() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+    const now = new Date().toLocaleDateString("pt-BR");
+    doc.setFillColor(30, 58, 138);
+    doc.rect(0, 0, 595, 60, "F");
+    doc.setTextColor(255,255,255);
+    doc.setFontSize(20); doc.setFont("helvetica","bold");
+    doc.text("Controle de Portas e Janelas", 40, 38);
+    doc.setFontSize(10); doc.setFont("helvetica","normal");
+    doc.text(`Emitido em ${now}`, 595-40, 38, { align:"right" });
+    const allEspecies = [...new Set(data.entries.map(e => e.especie))].sort();
+    const rows = allEspecies.map(esp => {
+      const st = stats(esp);
+      return [
+        esp,
+        `R$ ${st.desp.toLocaleString("pt-BR")}`,
+        `R$ ${st.port.toLocaleString("pt-BR")}`,
+        st.qtdPort > 0 ? `${st.qtdPort} un` : "-",
+        `R$ ${st.jan.toLocaleString("pt-BR")}`,
+        st.qtdJan > 0 ? `${st.qtdJan} un` : "-",
+        st.lucro >= 0 ? `+ ${st.lucro.toLocaleString("pt-BR")}` : `- ${Math.abs(st.lucro).toLocaleString("pt-BR")}`
+      ];
+    });
+    doc.autoTable({
+      startY: 80,
+      head: [["Espécie","Despesas","Portas R$","Portas Un","Janelas R$","Janelas Un","Lucro/Prejuízo"]],
+      body: rows,
+      foot: [[
+        "TOTAL",
+        `R$ ${totalDesp.toLocaleString("pt-BR")}`,
+        `R$ ${totalPort.toLocaleString("pt-BR")}`,
+        "",
+        `R$ ${totalJan.toLocaleString("pt-BR")}`,
+        "",
+        lucroGeral >= 0 ? `+ ${lucroGeral.toLocaleString("pt-BR")}` : `- ${Math.abs(lucroGeral).toLocaleString("pt-BR")}`
+      ]],
+      styles:{ fontSize:9, cellPadding:6 },
+      headStyles:{ fillColor:[255,255,255], textColor:[30,58,138], fontStyle:"bold", lineWidth:0.5, lineColor:[200,200,200] },
+      footStyles:{ fillColor:[255,255,255], textColor:[30,30,30], fontStyle:"bold", lineWidth:0.5, lineColor:[200,200,200] },
+      alternateRowStyles:{ fillColor:[255,255,255] },
+      columnStyles:{ 6:{ fontStyle:"bold" }, 4:{ halign:"right" } },
+      didParseCell: (data) => {
+        if (data.column.index === 6 && data.section === "body") {
+          const val = data.cell.raw || "";
+          if (String(val).startsWith("+")) data.cell.styles.textColor = [21,128,61];
+          else if (String(val).startsWith("-")) data.cell.styles.textColor = [185,28,28];
+        }
+        if (data.section === "foot" && data.column.index === 6) {
+          data.cell.styles.textColor = lucroGeral>=0?[21,128,61]:[185,28,28];
+        }
+      }
+    });
+    compartilharPDFPortas(doc, `portas-${now.replace(/\//g,"-")}.pdf`);
+  }
+
+  function exportPDFEspecie() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+    const now = new Date().toLocaleDateString("pt-BR");
+
+    doc.setTextColor(20, 20, 20);
+    doc.setFontSize(20); doc.setFont("helvetica","bold");
+    doc.text(especieAtiva || "", 40, 36);
+    doc.setFontSize(9); doc.setFont("helvetica","normal");
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Emitido em ${now}`, 595-40, 36, { align:"right" });
+
+    doc.setDrawColor(180, 180, 180);
+    doc.setLineWidth(0.5);
+    doc.line(40, 44, 555, 44);
+
+    const st = statsAtiva;
+    doc.setTextColor(60,60,60); doc.setFontSize(9);
+    doc.text(`Despesas: R$ ${st.desp.toLocaleString("pt-BR")}   Portas: R$ ${st.port.toLocaleString("pt-BR")} (${st.qtdPort} un)   Janelas: R$ ${st.jan.toLocaleString("pt-BR")} (${st.qtdJan} un)`, 40, 58);
+    const lucroText = st.lucro >= 0 ? `Lucro: R$ ${st.lucro.toLocaleString("pt-BR")}` : `Prejuízo: R$ ${Math.abs(st.lucro).toLocaleString("pt-BR")}`;
+    doc.setFont("helvetica","bold");
+    if (st.lucro >= 0) { doc.setTextColor(21, 128, 61); } else { doc.setTextColor(185, 28, 28); }
+    doc.text(lucroText, 40, 70);
+
+    const allEntries = data.entries
+      .filter(e => e.especie === especieAtiva)
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const totalEntradas = allEntries.filter(e => e.type !== "despesa").reduce((s,e)=>s+e.valor,0);
+    const totalSaidas   = allEntries.filter(e => e.type === "despesa").reduce((s,e)=>s+e.valor,0);
+    const saldo = totalEntradas - totalSaidas;
+    const totalQtd = allEntries.filter(e => e.type !== "despesa").reduce((s,e)=>s+(e.qtd||0),0);
+
+    const rows = allEntries.map(e => {
+      const tipo = e.type==="porta" ? "Porta" : e.type==="janela" ? "Janela" : EXPENSE_TYPES.find(t=>t.id===e.expType)?.label||"";
+      const nome = e.nome||"";
+      const desc = e.desc||"";
+      const parts = e.date.split("-");
+      const dateShort = `${parts[2]}/${parts[1]}`;
+      const qtd = e.qtd > 0 ? `${e.qtd}un` : "-";
+      const val = e.type==="despesa"
+        ? `- ${e.valor.toLocaleString("pt-BR")}`
+        : `+ ${e.valor.toLocaleString("pt-BR")}`;
+      return [dateShort, tipo, nome||desc, qtd, val];
+    });
+
+    doc.autoTable({
+      startY: 82,
+      head: [["Data","Tipo","Descrição","Qtd","Valor"]],
+      body: rows,
+      foot: [["", "", "", totalQtd > 0 ? `${totalQtd}un` : "",
+        saldo >= 0
+          ? `+ ${saldo.toLocaleString("pt-BR")}`
+          : `- ${Math.abs(saldo).toLocaleString("pt-BR")}`
+      ]],
+      styles:{ fontSize:9, cellPadding:5, textColor:[20,20,20] },
+      headStyles:{
+        fillColor:[255,255,255],
+        textColor:[30,58,138],
+        fontStyle:"bold",
+        lineWidth:0.5,
+        lineColor:[200,200,200]
+      },
+      footStyles:{
+        fillColor:[255,255,255],
+        textColor:[20,20,20],
+        fontStyle:"bold",
+        fontSize:10,
+        lineWidth:0.5,
+        lineColor:[200,200,200]
+      },
+      alternateRowStyles:{ fillColor:[245,248,255] },
+      columnStyles:{
+        0: { halign:"center", cellWidth:42 },
+        3: { halign:"right",  cellWidth:55 },
+        4: { halign:"right",  cellWidth:80 }
+      },
+      didParseCell: (hookData) => {
+        if (hookData.column.index === 4 && hookData.section === "body") {
+          const val = String(hookData.cell.raw||"");
+          if (val.startsWith("+")) hookData.cell.styles.textColor = [21,128,61];
+          else if (val.startsWith("-")) hookData.cell.styles.textColor = [185,28,28];
+        }
+        if (hookData.section === "foot") {
+          if (hookData.column.index === 3) {
+            hookData.cell.styles.textColor = [20, 20, 20];
+            hookData.cell.styles.fontStyle = "bold";
+          }
+          if (hookData.column.index === 4) {
+            hookData.cell.styles.textColor = saldo>=0?[21,128,61]:[185,28,28];
+          }
+        }
+      }
+    });
+    compartilharPDFPortas(doc, `${especieAtiva}-${now.replace(/\//g,"-")}.pdf`);
+  }
+
+  function changeTheme(t) {
+    setTheme(t);
+    setShowThemePicker(false);
+    try { storage.set(THEME_KEY, t.id); } catch {}
+  }
+
+  function handleAdd() {
+    const valor = parseFloat(String(form.valor).replace(",", "."));
+    if (!valor || isNaN(valor) || (!especieAtiva && !form.especie.trim())) return;
+    const especie = (especieAtiva || form.especie.trim()).toUpperCase();
+    if (editingId) {
+      const newEntries = data.entries.map(e => e.id === editingId ? {
+        ...e, type: form.type, expType: form.expType, especie,
+        nome: form.nome||"", desc: form.desc, valor,
+        qtd: (form.type === "porta" || form.type === "janela") ? parseInt(form.qtd) || 0 : 0,
+        date: form.date
+      } : e);
+      persist({ entries: newEntries });
+      setEditingId(null);
+      setEspecieAtiva(especie);
+      setSubTab(form.type === "porta" ? "portas" : form.type === "janela" ? "janelas" : "despesas");
+    } else {
+      const entry = {
+        id: Date.now(), type: form.type, expType: form.expType,
+        especie, nome: form.nome||"", desc: form.desc, valor,
+        qtd: (form.type === "porta" || form.type === "janela") ? parseInt(form.qtd) || 0 : 0,
+        date: form.date,
+      };
+      persist({ entries: [entry, ...data.entries] });
+      setEspecieAtiva(entry.especie);
+      setSubTab(form.type === "porta" ? "portas" : form.type === "janela" ? "janelas" : "despesas");
+    }
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+    setView("detail");
+  }
+
+  function handleDelete(id) {
+    const remaining = data.entries.filter(e => e.especie === especieAtiva).length;
+    const newData = { entries: data.entries.filter(e => e.id !== id) };
+    persist(newData);
+    setDeleteConfirm(null);
+    if (remaining <= 1) setView("list");
+  }
+
+  function handleRenameEspecie(novoNome) {
+    const novo = novoNome.trim().toUpperCase();
+    if (!novo || novo === especieAtiva) { setRenamingEspecie(false); return; }
+    const newEntries = data.entries.map(e => e.especie === especieAtiva ? {...e, especie: novo} : e);
+    persist({ entries: newEntries });
+    setEspecieAtiva(novo);
+    setRenamingEspecie(false);
+  }
+
+  function handleEdit(e) {
+    setEditingId(e.id);
+    setForm({
+      type: e.type, expType: e.expType || "tora",
+      especie: e.especie, nome: e.nome||"", desc: e.desc || "",
+      valor: String(e.valor), qtd: String(e.qtd || ""),
+      valorUnit: "", date: e.date
+    });
+    setView("form");
+  }
+
+  const especies = [...new Set(data.entries.map(e => e.especie))].sort((a, b) => {
+    const latestA = data.entries.filter(e => e.especie === a).map(e => e.date).sort().reverse()[0] || "";
+    const latestB = data.entries.filter(e => e.especie === b).map(e => e.date).sort().reverse()[0] || "";
+    return latestB.localeCompare(latestA);
+  });
+
+  function stats(esp) {
+    const desp = data.entries.filter(e => e.especie === esp && e.type === "despesa").reduce((s, e) => s + e.valor, 0);
+    const port = data.entries.filter(e => e.especie === esp && e.type === "porta").reduce((s, e) => s + e.valor, 0);
+    const jan = data.entries.filter(e => e.especie === esp && e.type === "janela").reduce((s, e) => s + e.valor, 0);
+    const qtdPort = data.entries.filter(e => e.especie === esp && e.type === "porta").reduce((s, e) => s + (e.qtd || 0), 0);
+    const qtdJan = data.entries.filter(e => e.especie === esp && e.type === "janela").reduce((s, e) => s + (e.qtd || 0), 0);
+    return { desp, port, jan, receita: port + jan, lucro: port + jan - desp, qtdPort, qtdJan };
+  }
+
+  const totalDesp = data.entries.filter(e => e.type === "despesa").reduce((s, e) => s + e.valor, 0);
+  const totalPort = data.entries.filter(e => e.type === "porta").reduce((s, e) => s + e.valor, 0);
+  const totalJan = data.entries.filter(e => e.type === "janela").reduce((s, e) => s + e.valor, 0);
+  const totalReceita = totalPort + totalJan;
+  const lucroGeral = totalReceita - totalDesp;
+
+  const entriesAtivas = especieAtiva
+    ? data.entries.filter(e => e.especie === especieAtiva && e.type === (subTab === "portas" ? "porta" : subTab === "janelas" ? "janela" : "despesa") && (subTab !== "despesas" || !filterType || e.expType === filterType) && (!filterDoorName || e.nome === filterDoorName)).sort((a, b) => b.date.localeCompare(a.date))
+    : [];
+
+  const statsAtiva = especieAtiva ? stats(especieAtiva) : null;
+
+  if (loading) return <div style={s.loadWrap}><div style={s.spinner} /></div>;
+
+  // FORM
+  if (view === "form") return (
+    <div style={s.root}>
+      <div style={{...s.header, background:`linear-gradient(135deg, ${theme.a} 0%, ${theme.b} 60%, ${theme.a}cc 100%)`}}>
+        <button style={s.backBtn} onClick={() => setView(especieAtiva ? "detail" : "list")}>‹</button>
+        <span style={s.headerTitle}>{editingId ? "Editar Lançamento" : "Novo Lançamento"}</span>
+      </div>
+      <div style={s.page}>
+        <div style={s.toggleRow}>
+          <button style={{...s.toggleBtn, ...(form.type==="despesa"?s.tOrange:{})}} onClick={() => setForm(f=>({...f,type:"despesa",valor:"",qtd:"",valorUnit:""}))}>💸 Despesa</button>
+          <button style={{...s.toggleBtn, ...(form.type==="porta"?s.tGreen:{})}} onClick={() => setForm(f=>({...f,type:"porta",valor:"",qtd:"",valorUnit:""}))}>🚪 Porta</button>
+          <button style={{...s.toggleBtn, ...(form.type==="janela"?s.tBlue:{})}} onClick={() => setForm(f=>({...f,type:"janela",valor:"",qtd:"",valorUnit:""}))}>🪟 Janela</button>
+        </div>
+
+        {especieAtiva ? (
+          <div style={s.especieFixaBadge}>🌿 {especieAtiva}</div>
+        ) : (
+          <>
+            <div style={s.label}>Espécie da Madeira *</div>
+            <input style={s.input} type="text" placeholder="Ex: Amarelão, Jatobá..." value={form.especie} onChange={e => setForm(f=>({...f,especie:e.target.value}))} />
+          </>
+        )}
+
+        <div style={s.label}>Data</div>
+        <input style={{...s.input, colorScheme:"dark"}} type="date" value={form.date} onChange={e => setForm(f=>({...f,date:e.target.value}))} />
+
+        {form.type === "despesa" && (
+          <>
+            <div style={s.label}>Tipo de Despesa</div>
+            <div style={s.expGrid}>
+              {EXPENSE_TYPES.map(t => (
+                <button key={t.id} style={{...s.expBtn, ...(form.expType===t.id?s.expActive:{})}} onClick={() => setForm(f=>({...f,expType:t.id,m3:"",vrM3:"",valor:""}))}>
+                  <span style={{fontSize:16}}>{t.emoji}</span>
+                  <span style={{fontSize:10,marginTop:2}}>{t.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {(form.expType==="tora"||form.expType==="madeira") && (
+              <div style={s.m3Calc}>
+                <div style={s.m3CalcTitle}>📐 Calculadora M³</div>
+                <div style={s.m3Row}>
+                  <div style={s.m3Col}>
+                    <span style={s.m3Label}>Quantidade (m³)</span>
+                    <input
+                      style={s.m3Input}
+                      type="number" inputMode="decimal"
+                      placeholder="Ex: 1.200"
+                      value={form.m3||""}
+                      onChange={e => {
+                        const m3 = e.target.value;
+                        const vr = parseFloat(String(form.vrM3||"").replace(",",".")) || 0;
+                        const total = m3 && vr ? String(parseFloat(m3)*vr) : form.valor;
+                        setForm(f=>({...f, m3, valor: total}));
+                      }}
+                    />
+                  </div>
+                  <span style={s.m3X}>×</span>
+                  <div style={s.m3Col}>
+                    <span style={s.m3Label}>R$ por m³</span>
+                    <input
+                      style={s.m3Input}
+                      type="number" inputMode="decimal"
+                      placeholder="Ex: 600"
+                      value={form.vrM3||""}
+                      onChange={e => {
+                        const vr = e.target.value;
+                        const m3 = parseFloat(String(form.m3||"").replace(",",".")) || 0;
+                        const total = vr && m3 ? String(m3*parseFloat(vr)) : form.valor;
+                        setForm(f=>({...f, vrM3: vr, valor: total}));
+                      }}
+                    />
+                  </div>
+                </div>
+                {(form.m3 && form.vrM3) && (
+                  <div style={s.m3Result}>
+                    {parseFloat(form.m3||0).toLocaleString("pt-BR")} m³ × {formatBRL(parseFloat(form.vrM3||0))} = <strong style={{color:"#4ade80"}}>{formatBRL(parseFloat(form.m3||0)*parseFloat(form.vrM3||0))}</strong>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {(form.type === "porta" || form.type === "janela") && (
+          <>
+            <div style={s.label}>Nome da {form.type==="janela"?"Janela":"Porta"}</div>
+            <input style={s.input} type="text" placeholder="Ex: Americana, Tijolinho, Diagonal..." value={form.nome||""} onChange={e => setForm(f=>({...f,nome:e.target.value}))} />
+            <div style={s.label}>Quantidade de {form.type==="janela"?"Janelas":"Portas"}</div>
+            <input style={s.input} type="number" inputMode="numeric" placeholder="Ex: 400" value={form.qtd}
+              onChange={e => {
+                const qtd = e.target.value;
+                const unit = parseFloat(String(form.valorUnit||"").replace(",",".")) || 0;
+                setForm(f=>({...f, qtd, valor: (unit&&qtd)?String(unit*parseInt(qtd)):f.valor}));
+              }} />
+            <div style={s.label}>Valor por {form.type==="janela"?"Janela":"Porta"} (R$)</div>
+            <input style={s.input} type="number" inputMode="decimal" placeholder="Ex: 150" value={form.valorUnit||""}
+              onChange={e => {
+                const unit = e.target.value;
+                const qtd = parseInt(form.qtd)||0;
+                setForm(f=>({...f, valorUnit:unit, valor:(unit&&qtd)?String(parseFloat(unit)*qtd):f.valor}));
+              }} />
+            {(form.qtd && form.valorUnit) && (
+              <div style={s.calcPreview}>
+                {form.qtd} × {formatBRL(parseFloat(form.valorUnit||0))} = <strong>{formatBRL(parseFloat(form.valorUnit||0)*(parseInt(form.qtd)||0))}</strong>
+              </div>
+            )}
+            <div style={s.label}>Valor Total (R$) *</div>
+            <input style={s.input} type="number" inputMode="decimal" placeholder="Calculado automaticamente" value={form.valor} onChange={e => setForm(f=>({...f,valor:e.target.value}))} />
+          </>
+        )}
+
+        {form.type === "despesa" && (
+          <>
+            <div style={s.label}>Valor (R$) *</div>
+            <input style={s.input} type="number" inputMode="decimal" placeholder="Ex: 50000" value={form.valor} onChange={e => setForm(f=>({...f,valor:e.target.value}))} />
+          </>
+        )}
+
+        <div style={s.label}>Observação (opcional)</div>
+        <input style={s.input} type="text" placeholder="Ex: Fornecedor X" value={form.desc} onChange={e => setForm(f=>({...f,desc:e.target.value}))} />
+
+        <button style={{...s.btnSave, opacity:(form.valor&&(especieAtiva||form.especie.trim()))?1:0.4}}
+          onClick={handleAdd} disabled={!form.valor||(!especieAtiva&&!form.especie.trim())}>
+          {editingId ? "✅ Salvar Edição" : "✅ Salvar Lançamento"}
+        </button>
+        <button style={s.btnCancel} onClick={() => setView(especieAtiva?"detail":"list")}>Cancelar</button>
+        <div style={{height:30}} />
+      </div>
+    </div>
+  );
+
+  // DETAIL
+  if (view === "detail" && especieAtiva && statsAtiva) return (
+    <div style={s.root}>
+      <div style={{
+        ...s.header,
+        background:`linear-gradient(135deg, ${theme.a} 0%, ${theme.b} 60%, ${theme.a}cc 100%)`,
+        position:"sticky", top:0, zIndex:20,
+        transform: headerVisible ? "translateY(0)" : "translateY(-100%)",
+        transition: "transform 0.3s ease"
+      }}>
+        {renamingEspecie ? (
+          <div style={{display:"flex",alignItems:"center",gap:6,flex:1}}>
+            <input
+              autoFocus
+              style={{...s.input, padding:"6px 10px", fontSize:14, fontWeight:800, flex:1, margin:0, borderColor:"#6366f1"}}
+              value={renameValue}
+              onChange={e => setRenameValue(e.target.value)}
+              onKeyDown={e => { if(e.key==="Enter") handleRenameEspecie(renameValue); if(e.key==="Escape") setRenamingEspecie(false); }}
+            />
+            <button style={{background:"#4f46e5",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}
+              onClick={()=>handleRenameEspecie(renameValue)}>OK</button>
+            <button style={{background:"#374151",border:"none",borderRadius:8,padding:"6px 10px",color:"#9ca3af",fontWeight:700,fontSize:13,cursor:"pointer"}}
+              onClick={()=>setRenamingEspecie(false)}>✕</button>
+          </div>
+        ) : (
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{
+              background:"rgba(59,130,246,0.15)",
+              border:"1px solid rgba(59,130,246,0.35)",
+              borderRadius:8,
+              padding:"5px 14px",
+              fontSize:15, fontWeight:800, color:"#93c5fd", letterSpacing:0.3
+            }}>{especieAtiva}</div>
+            <button
+              title="Renomear espécie"
+              style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,padding:"5px 8px",color:"#cbd5e1",fontSize:14,cursor:"pointer",lineHeight:1}}
+              onClick={()=>{ setRenameValue(especieAtiva); setRenamingEspecie(true); }}>✏️</button>
+          </div>
+        )}
+        <button style={{...s.backBtn, marginLeft:"auto"}} onClick={() => setView("list")}>›</button>
+      </div>
+      {saved && <div style={s.toast}>✅ Lançamento salvo!</div>}
+      <div style={s.detailHeader}>
+        <div style={s.detailRow1}>
+          <div style={s.detailMini}>
+            <span style={s.detailMiniLabel}>🚪 portas</span>
+            <span style={{...s.detailMiniVal, color:"#22c55e"}}>{statsAtiva.qtdPort>0?`${statsAtiva.qtdPort} un`:"—"}</span>
+          </div>
+          <div style={s.detailMiniDiv}/>
+          <div style={s.detailMini}>
+            <span style={s.detailMiniLabel}>🪟 janelas</span>
+            <span style={{...s.detailMiniVal, color:"#60b4f7"}}>{statsAtiva.qtdJan>0?`${statsAtiva.qtdJan} un`:"—"}</span>
+          </div>
+          <div style={s.detailMiniDiv}/>
+          <div style={{...s.detailMini, flex:2}}>
+            <span style={s.detailMiniLabel}>{statsAtiva.lucro>=0?"LUCRO":"PREJUÍZO"}</span>
+            <span style={{...s.detailLucroVal, color:statsAtiva.lucro>=0?"#22c55e":"#ff6b6b"}}>{formatBRLInt(Math.abs(statsAtiva.lucro))}</span>
+          </div>
+        </div>
+        <div style={s.detailRow2}>
+          <button style={{...s.detailTabBtn, ...(subTab==="despesas"?{borderBottom:"2px solid #fb923c"}:{})}}
+            onClick={()=>{setSubTab("despesas");setFilterDoorName(null);}}>
+            <span style={s.detailValLabel}>Despesas</span>
+            <span style={{...s.detailValNum, color:"#ff6b6b"}}>{formatBRLInt(statsAtiva.desp)}</span>
+          </button>
+          <button style={{...s.detailTabBtn, ...(subTab==="portas"?{borderBottom:"2px solid #4ade80"}:{})}}
+            onClick={()=>{setSubTab("portas");setFilterDoorName(null);}}>
+            <span style={s.detailValLabel}>Portas</span>
+            <span style={{...s.detailValNum, color:"#22c55e"}}>{formatBRLInt(statsAtiva.port)}</span>
+          </button>
+          <button style={{...s.detailTabBtn, ...(subTab==="janelas"?{borderBottom:"2px solid #60b4f7"}:{})}}
+            onClick={()=>{setSubTab("janelas");setFilterDoorName(null);}}>
+            <span style={s.detailValLabel}>Janelas</span>
+            <span style={{...s.detailValNum, color:"#60b4f7"}}>{formatBRLInt(statsAtiva.jan)}</span>
+          </button>
+        </div>
+      </div>
+
+      <div style={s.page}>
+        {filterDoorName && (
+          <div style={s.filterActiveBar}>
+            Filtrando: <strong>{filterDoorName}</strong>
+            <button style={s.filterClearBtn} onClick={()=>setFilterDoorName(null)}>✕ limpar</button>
+          </div>
+        )}
+        {entriesAtivas.length===0 ? (
+          <div style={s.emptySmall}>Nenhum lançamento de {subTab} para {especieAtiva}.</div>
+        ) : entriesAtivas.map(e => (
+          <EntryCard
+            key={e.id} e={e}
+            deleteConfirm={deleteConfirm} setDeleteConfirm={setDeleteConfirm}
+            handleDelete={handleDelete} handleEdit={handleEdit}
+            filterType={filterType} setFilterType={setFilterType}
+            filterDoorName={filterDoorName} setFilterDoorName={setFilterDoorName}
+          />
+        ))}
+      </div>
+      <div style={s.fabAreaRight}>
+        <div style={s.fabMiniRow}>
+          <button style={s.fabMiniBtn} onClick={exportPDFEspecie} title="Exportar PDF">📄</button>
+          <button style={s.fabMiniBtn} onClick={()=>setShowThemePicker(p=>!p)} title="Cor">🎨</button>
+        </div>
+        <button style={s.fabSmall} onClick={() => {
+          setEditingId(null);
+          setForm(f=>({...f, especie:especieAtiva, type:subTab==="portas"?"porta":subTab==="janelas"?"janela":"despesa", valor:"", qtd:"", valorUnit:"", m3:"", vrM3:"", desc:"", date:today()}));
+          setView("form");
+        }}>+</button>
+      </div>
+    </div>
+  );
+
+  // LIST
+  return (
+    <div style={s.root}>
+      <div style={{
+        ...s.headerGrad,
+        background:`linear-gradient(135deg, ${theme.a} 0%, ${theme.b} 60%, ${theme.a}cc 100%)`,
+        transform:headerVisible?"translateY(0)":"translateY(-100%)",
+        transition:"transform 0.3s ease"
+      }}>
+        <div style={s.headerCardsRow}>
+          <div style={s.cardAmarelo}>
+            <div style={s.cardAntLabel}>DESPESAS TOTAIS</div>
+            <div style={s.cardAntVal}>{formatBRLInt(totalDesp)}</div>
+            <div style={s.cardAntDivider} />
+            <div style={s.cardAntLabel}>RECEITA TOTAL</div>
+            <div style={{...s.cardAntVal, color:"#22c55e", fontSize:18}}>{formatBRLInt(totalReceita)}</div>
+          </div>
+          <div style={{...s.cardBranco, border:"none", boxShadow: lucroGeral>=0 ? "0 0 12px 2px rgba(34,197,94,0.25)" : "0 0 12px 2px rgba(255,100,100,0.25)"}}>
+            <div style={s.cardBrancoLabel}>{lucroGeral>=0?"✅ Lucro Geral":"⚠️ Prejuízo"}</div>
+            <div style={{...s.cardBrancoVal, color: lucroGeral>=0?"#22c55e":"#ff6b6b"}}>
+              {formatBRLInt(Math.abs(lucroGeral))}
+            </div>
+          </div>
+        </div>
+
+        {showThemePicker && (
+          <div style={s.themePickerPanel}>
+            <div style={s.themePickerTitle}>🎨 Escolha uma cor</div>
+            <div style={s.themeGrid}>
+              {THEMES.map(t => (
+                <button key={t.id} style={{...s.themeSwatchBtn, ...(theme.id===t.id?s.themeSwatchActive:{})}}
+                  onClick={()=>changeTheme(t)}>
+                  <div style={{...s.themeSwatch, background:`linear-gradient(135deg,${t.a},${t.b})`}}/>
+                  <span style={s.themeSwatchLabel}>{t.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={s.mainTabRow}>
+          <button style={{...s.mainTab, ...(mainTab==="especies"?s.mainTabActive:{})}} onClick={()=>setMainTab("especies")}>Espécies</button>
+          <button style={{...s.mainTab, ...(mainTab==="resumo"?s.mainTabActive:{})}} onClick={()=>setMainTab("resumo")}>Resumo</button>
+        </div>
+      </div>
+
+      {saved && <div style={s.toast}>✅ Salvo!</div>}
+
+      {mainTab==="especies" && (
+        <div style={s.listPage}>
+          {especies.length===0 ? (
+            <div style={s.empty}>Nenhuma espécie cadastrada.<br/>Toque em <b>+</b> para começar.</div>
+          ) : especies.map(esp => {
+            const st = stats(esp);
+            return (
+              <EspecieCard
+                key={esp} esp={esp} st={st}
+                onOpen={()=>{setEspecieAtiva(esp);setSubTab("despesas");setView("detail");}}
+                onDelete={()=>{ persist({entries:data.entries.filter(e=>e.especie!==esp)}); }}
+                formatBRLInt={formatBRLInt} formatBRL={formatBRL}
+              />
+            );
+          })}
+        </div>
+      )}
+
+      {mainTab==="resumo" && (
+        <div style={s.listPage}>
+          <div style={s.resumoCard}>
+            <div style={s.resumoRow}><span style={s.resumoLabel}>Total Despesas</span><span style={{...s.resumoVal,color:"#ff6b6b"}}>{formatBRL(totalDesp)}</span></div>
+            <div style={s.resumoRow}><span style={s.resumoLabel}>🚪 Total Portas</span><span style={{...s.resumoVal,color:"#22c55e"}}>{formatBRL(totalPort)}</span></div>
+            <div style={s.resumoRow}><span style={s.resumoLabel}>🪟 Total Janelas</span><span style={{...s.resumoVal,color:"#60b4f7"}}>{formatBRL(totalJan)}</span></div>
+            <div style={{...s.resumoRow,borderTop:"1px solid #333",paddingTop:12,marginTop:4}}>
+              <span style={{...s.resumoLabel,fontWeight:800,color:"#fff"}}>{lucroGeral>=0?"Lucro":"Prejuízo"}</span>
+              <span style={{...s.resumoVal,color:lucroGeral>=0?"#22c55e":"#ff6b6b",fontWeight:900,fontSize:22}}>{formatBRL(Math.abs(lucroGeral))}</span>
+            </div>
+          </div>
+          {especies.length>0 && (
+            <>
+              <div style={s.resumoSectionTitle}>Por Espécie</div>
+              {especies.map(esp => {
+                const st = stats(esp);
+                return (
+                  <div key={esp} style={s.resumoEspCard}>
+                    <div style={s.resumoRow}><span style={{color:"#fff",fontWeight:700,fontSize:15}}>{esp}</span><span style={{color:st.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:800}}>{st.lucro>=0?"+":"-"} {formatBRL(Math.abs(st.lucro))}</span></div>
+                    <div style={s.resumoRow}><span style={s.resumoLabel}>Despesas</span><span style={{color:"#ff6b6b",fontWeight:600}}>{formatBRL(st.desp)}</span></div>
+                    <div style={s.resumoRow}><span style={s.resumoLabel}>🚪 Portas{st.qtdPort>0?` (${st.qtdPort} un)`:""}</span><span style={{color:"#22c55e",fontWeight:600}}>{formatBRL(st.port)}</span></div>
+                    <div style={s.resumoRow}><span style={s.resumoLabel}>🪟 Janelas{st.qtdJan>0?` (${st.qtdJan} un)`:""}</span><span style={{color:"#60b4f7",fontWeight:600}}>{formatBRL(st.jan)}</span></div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      )}
+
+      <div style={s.fabAreaRight}>
+        <div style={s.fabMiniRow}>
+          <button style={s.fabMiniBtn} onClick={exportPDF} title="Exportar PDF">📄</button>
+          <button style={s.fabMiniBtn} onClick={()=>setShowThemePicker(p=>!p)} title="Cor">🎨</button>
+        </div>
+        <button style={s.fabSmall} onClick={()=>{setEspecieAtiva(null);setEditingId(null);setForm({type:"despesa",expType:"tora",especie:"",desc:"",valor:"",qtd:"",valorUnit:"",m3:"",vrM3:"",date:today()});setView("form");}}>+</button>
+      </div>
+    </div>
+  );
+}
+
+const s = {
+  root:{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#111827",minHeight:"100vh",paddingBottom:100},
+  loadWrap:{display:"flex",justifyContent:"center",alignItems:"center",height:"100vh",background:"#111827"},
+  spinner:{width:36,height:36,borderRadius:"50%",border:"4px solid #333",borderTop:"4px solid #6366f1"},
+  headerGrad:{padding:"48px 16px 0",position:"sticky",top:0,zIndex:10,overflow:"visible"},
+  headerCardsRow:{display:"flex",gap:10,marginBottom:12},
+  cardAmarelo:{flex:1,border:"none",borderRadius:14,padding:"12px 14px",background:"rgba(0,0,0,0.25)",display:"flex",flexDirection:"column",gap:2},
+  cardAntLabel:{fontSize:10,color:"#93c5fd",fontWeight:700,letterSpacing:0.5,textTransform:"uppercase"},
+  cardAntVal:{fontSize:20,fontWeight:900,color:"#fff",lineHeight:1.2},
+  cardAntDivider:{height:1,background:"rgba(255,255,255,0.15)",margin:"8px 0"},
+  cardBranco:{flex:1,border:"none",borderRadius:14,padding:"12px 14px",background:"rgba(0,0,0,0.25)",display:"flex",flexDirection:"column",alignItems:"flex-start",justifyContent:"center",gap:6},
+  cardBrancoLabel:{fontSize:13,color:"#e0e7ff",fontWeight:700},
+  cardBrancoVal:{fontSize:26,fontWeight:900,lineHeight:1.1},
+  headerTop:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10},
+  headerSmLabel:{fontSize:11,color:"#93c5fd",fontWeight:700,letterSpacing:0.5,marginBottom:3},
+  headerBigVal:{fontSize:20,fontWeight:900,color:"#fff"},
+  headerLucroRow:{display:"flex",justifyContent:"space-between",alignItems:"center",background:"rgba(255,255,255,0.1)",borderRadius:10,padding:"8px 12px",marginBottom:14},
+  headerLucroLabel:{color:"#e0e7ff",fontWeight:700,fontSize:13},
+  headerLucroVal:{fontWeight:900,fontSize:18},
+  mainTabRow:{display:"flex",borderTop:"1px solid rgba(255,255,255,0.15)"},
+  mainTab:{flex:1,background:"none",border:"none",color:"rgba(255,255,255,0.55)",fontSize:15,fontWeight:700,padding:"14px 0",cursor:"pointer"},
+  mainTabActive:{color:"#fff",borderBottom:"3px solid #fff"},
+  header:{background:"linear-gradient(160deg,#1e3a8a 0%,#3730a3 100%)",color:"#fff",padding:"16px 18px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:20},
+  backBtn:{background:"none",border:"none",color:"#fff",fontSize:30,cursor:"pointer",padding:"0 6px 0 0",lineHeight:1},
+  headerTitle:{fontSize:18,fontWeight:800,color:"#fff"},
+  toast:{background:"#166534",color:"#fff",margin:"12px 14px 0",borderRadius:10,padding:"10px 16px",fontWeight:700,textAlign:"center",fontSize:15},
+  listPage:{padding:"14px 14px 0"},
+  page:{padding:"14px 14px 0"},
+  especieCard:{width:"100%",background:"#1f2937",border:"none",borderRadius:16,padding:"16px",marginBottom:12,textAlign:"left",cursor:"pointer",boxShadow:"0 2px 8px rgba(0,0,0,0.3)"},
+  cardTop:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10},
+  cardName:{color:"#fff",fontSize:17,fontWeight:800,letterSpacing:0.3},
+  cardLucroVal:{fontSize:15,fontWeight:800},
+  cardStatsRow:{display:"flex",alignItems:"stretch",gap:0,margin:"10px 0 8px",background:"#111827",borderRadius:10,overflow:"hidden"},
+  cardStatCol:{flex:1,display:"flex",flexDirection:"column",gap:3,padding:"8px 10px"},
+  cardStatLabel:{fontSize:11,color:"#9ca3af",fontWeight:600},
+  cardStatVal:{fontSize:13,fontWeight:800},
+  cardStatQtd:{fontSize:11,color:"#6b7280",fontWeight:600},
+  cardStatDivider:{width:1,background:"#374151",flexShrink:0},
+  detailHeader:{background:"#1f2937",padding:"16px 18px",borderBottom:"1px solid #374151"},
+  detailRow1:{display:"flex",alignItems:"center",marginBottom:8},
+  detailRow2:{display:"flex",alignItems:"center",justifyContent:"space-between"},
+  detailMini:{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:1},
+  detailMiniLabel:{fontSize:9,color:"#6b7280",fontWeight:600},
+  detailMiniVal:{fontSize:15,fontWeight:800},
+  detailMiniDiv:{width:1,height:28,background:"#374151",flexShrink:0},
+  detailLucroVal:{fontSize:20,fontWeight:900},
+  detailTabBtn:{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,paddingTop:8,borderTop:"1px solid #374151",background:"none",border:"none",borderBottom:"2px solid transparent",cursor:"pointer",paddingBottom:6},
+  detailValLabel:{fontSize:10,color:"#cbd5e1",fontWeight:700,textTransform:"uppercase",letterSpacing:0.5},
+  detailValNum:{fontSize:17,fontWeight:800},
+  entryCard:{background:"#1f2937",borderRadius:12,padding:"14px 16px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"flex-start"},
+  entryLeft:{display:"flex",gap:10,alignItems:"flex-start",flex:1},
+  entryName:{fontSize:15,fontWeight:700,color:"#f9fafb"},
+  entryDate:{fontSize:13,color:"#94a3b8",marginTop:3,fontWeight:500},
+  entryDesc:{fontSize:13,color:"#64748b",marginTop:3,fontWeight:500},
+  entryRight:{textAlign:"right",display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6},
+  doorNameTag:{color:"#f3f4f6",fontWeight:700,cursor:"pointer",borderRadius:4,padding:"1px 4px"},
+  doorNameTagActive:{background:"#4f46e5",color:"#fff",borderRadius:4,padding:"1px 4px"},
+  filterActiveBar:{background:"#1e3a5f",color:"#93c5fd",borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:13,display:"flex",alignItems:"center",justifyContent:"space-between"},
+  filterClearBtn:{background:"none",border:"none",color:"#60b4f7",fontSize:13,cursor:"pointer",fontWeight:700},
+  emojiFilterBtn:{background:"none",border:"2px solid transparent",borderRadius:8,padding:"2px 4px",fontSize:20,cursor:"pointer",lineHeight:1},
+  emojiFilterActive:{border:"2px solid #fb923c",background:"rgba(251,146,60,0.15)",borderRadius:8},
+  themePickerPanel:{background:"#1f2937",margin:"0 0 10px",borderRadius:14,padding:"14px",boxShadow:"0 4px 20px rgba(0,0,0,0.4)"},
+  themePickerTitle:{color:"#e5e7eb",fontWeight:700,fontSize:14,marginBottom:12},
+  themeGrid:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10},
+  themeSwatchBtn:{background:"none",border:"2px solid transparent",borderRadius:10,padding:"6px 4px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:4},
+  themeSwatchActive:{border:"2px solid #fff"},
+  themeSwatch:{width:36,height:36,borderRadius:8},
+  themeSwatchLabel:{color:"#9ca3af",fontSize:10,fontWeight:600},
+  fabSmall:{background:"#4f46e5",color:"#fff",border:"none",width:58,height:58,borderRadius:"50%",fontSize:30,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",boxShadow:"0 4px 20px rgba(79,70,229,0.6)",fontWeight:300},
+  fabAreaRight:{position:"fixed",bottom:20,right:16,display:"flex",flexDirection:"column",alignItems:"center",gap:8,zIndex:30},
+  fabMiniRow:{display:"flex",flexDirection:"column",gap:6},
+  fabMiniBtn:{background:"rgba(31,41,55,0.95)",border:"1px solid #4b5563",borderRadius:"50%",width:36,height:36,fontSize:15,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 8px rgba(0,0,0,0.4)"},
+  delRow:{display:"flex",gap:5},
+  btnDelOk:{background:"#7f1d1d",color:"#fca5a5",border:"none",borderRadius:6,padding:"3px 8px",fontSize:12,cursor:"pointer",fontWeight:700},
+  btnDelNo:{background:"#374151",color:"#d1d5db",border:"none",borderRadius:6,padding:"3px 8px",fontSize:12,cursor:"pointer"},
+  resumoCard:{background:"#1f2937",borderRadius:16,padding:"18px",marginBottom:16},
+  resumoEspCard:{background:"#1f2937",borderRadius:14,padding:"14px 16px",marginBottom:10},
+  resumoSectionTitle:{color:"#9ca3af",fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10},
+  resumoRow:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8},
+  resumoLabel:{color:"#9ca3af",fontSize:14},
+  resumoVal:{fontSize:18,fontWeight:800},
+  empty:{textAlign:"center",color:"#4b5563",fontSize:15,padding:"60px 20px",lineHeight:1.9},
+  emptySmall:{textAlign:"center",color:"#4b5563",fontSize:14,padding:"40px 20px"},
+  toggleRow:{display:"flex",gap:8,marginBottom:16},
+  toggleBtn:{flex:1,padding:"11px 4px",borderRadius:12,border:"2px solid #374151",background:"#1f2937",fontSize:13,fontWeight:700,cursor:"pointer",color:"#9ca3af"},
+  tOrange:{borderColor:"#ca8a04",background:"#1c1600",color:"#fde68a"},
+  tGreen:{borderColor:"#4ade80",background:"#052e16",color:"#4ade80"},
+  tBlue:{borderColor:"#60b4f7",background:"#0c2a40",color:"#60b4f7"},
+  label:{fontSize:13,fontWeight:700,color:"#9ca3af",marginBottom:6,marginTop:14},
+  input:{width:"100%",padding:"14px",borderRadius:12,border:"1.5px solid #374151",fontSize:16,background:"#1f2937",outline:"none",boxSizing:"border-box",color:"#f9fafb",colorScheme:"dark"},
+  expGrid:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6},
+  expBtn:{border:"2px solid #374151",background:"#1f2937",borderRadius:10,padding:"8px 4px",display:"flex",flexDirection:"column",alignItems:"center",cursor:"pointer",color:"#9ca3af",fontWeight:600},
+  expActive:{borderColor:"#ca8a04",background:"#1c1600",color:"#fde68a"},
+  m3Calc:{background:"#0f2337",border:"1px solid #1e4060",borderRadius:14,padding:"14px",marginTop:12},
+  m3CalcTitle:{color:"#60b4f7",fontWeight:700,fontSize:13,marginBottom:10},
+  m3Row:{display:"flex",alignItems:"flex-end",gap:8},
+  m3Col:{flex:1,display:"flex",flexDirection:"column",gap:5},
+  m3Label:{fontSize:11,color:"#6b7280",fontWeight:600},
+  m3Input:{width:"100%",padding:"11px 10px",borderRadius:10,border:"1.5px solid #1e4060",fontSize:15,background:"#111827",color:"#f9fafb",outline:"none",boxSizing:"border-box"},
+  m3X:{color:"#4b5563",fontSize:20,fontWeight:700,paddingBottom:10,flexShrink:0},
+  m3Result:{background:"#0a1f0a",border:"1px solid #14532d",borderRadius:10,padding:"10px 14px",fontSize:14,color:"#86efac",marginTop:10,textAlign:"center"},
+  btnSave:{width:"100%",padding:"15px",borderRadius:14,border:"none",background:"#4f46e5",color:"#fff",fontSize:16,fontWeight:800,cursor:"pointer",marginTop:22,boxShadow:"0 4px 12px rgba(79,70,229,0.4)"},
+  btnCancel:{width:"100%",padding:"13px",borderRadius:14,border:"none",background:"#1f2937",color:"#9ca3af",fontSize:15,fontWeight:700,cursor:"pointer",marginTop:10},
+  calcPreview:{background:"#1e3a5f",color:"#93c5fd",borderRadius:10,padding:"10px 14px",fontSize:14,marginTop:8,marginBottom:4},
+  especieFixaBadge:{background:"#312e81",color:"#a5b4fc",borderRadius:12,padding:"12px 16px",fontSize:16,fontWeight:800,marginTop:14,marginBottom:2,display:"inline-block"},
+};
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+
+function compartilharPDFPortas(doc, fileName) {
+  const blob = doc.output('blob');
+  const file = new File([blob], fileName, {type:'application/pdf'});
+  if (navigator.canShare && navigator.canShare({files:[file]})) {
+    navigator.share({files:[file], title:'Controle de Portas'}).catch(()=>{});
+  } else {
+    const dataUri = doc.output('datauristring');
+    const a = document.createElement('a');
+    a.href = dataUri; a.download = fileName;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+}
+</script>
+</body>
+</html>
