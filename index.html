@@ -1,5 +1,4 @@
-
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
@@ -26,8 +25,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.6.0/jspdf.plugin.autotable.min.js"></script>
 <script type="text/babel">
-const { useState, useEffect, useRef } = React;
-const STORAGE_KEY = "portas-app-v5";
+const { useState, useEffect, useRef, useMemo } = React;
+const STORAGE_KEY = "portas-app-v9";
 
 function useLongPress(onLongPress, ms = 550) {
   const timerRef = useRef(null);
@@ -36,6 +35,33 @@ function useLongPress(onLongPress, ms = 550) {
   const move = () => { movedRef.current = true; clear(); };
   const clear = () => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; } };
   return { onTouchStart: start, onTouchMove: move, onTouchEnd: clear, onTouchCancel: clear };
+}
+
+function BarChart({ desp, receita, lucro, theme }) {
+  const max = Math.max(desp, receita, Math.abs(lucro), 1);
+  const hDesp = (desp / max) * 100;
+  const hRec = (receita / max) * 100;
+  const hLuc = (Math.abs(lucro) / max) * 100;
+  const lucColor = lucro >= 0 ? "#22c55e" : "#ff6b6b";
+  return (
+    <div style={{display:"flex",alignItems:"flex-end",justifyContent:"center",gap:14,height:90,margin:"14px 0 6px"}}>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+        <span style={{fontSize:10,color:"#9ca3af",fontWeight:700}}>{formatShortNum(desp)}</span>
+        <div style={{width:32,height:`${hDesp}%`,background:"#ff6b6b",borderRadius:"6px 6px 0 0",minHeight:4,transition:"height 0.6s ease"}} />
+        <span style={{fontSize:9,color:"#ff6b6b",fontWeight:700}}>Desp</span>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+        <span style={{fontSize:10,color:"#9ca3af",fontWeight:700}}>{formatShortNum(receita)}</span>
+        <div style={{width:32,height:`${hRec}%`,background:"#22c55e",borderRadius:"6px 6px 0 0",minHeight:4,transition:"height 0.6s ease"}} />
+        <span style={{fontSize:9,color:"#22c55e",fontWeight:700}}>Rec</span>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+        <span style={{fontSize:10,color:"#9ca3af",fontWeight:700}}>{formatShortNum(Math.abs(lucro))}</span>
+        <div style={{width:32,height:`${hLuc}%`,background:lucColor,borderRadius:"6px 6px 0 0",minHeight:4,transition:"height 0.6s ease"}} />
+        <span style={{fontSize:9,color:lucColor,fontWeight:700}}>{lucro>=0?"Luc":"Prej"}</span>
+      </div>
+    </div>
+  );
 }
 
 function EntryCard({ e, deleteConfirm, setDeleteConfirm, handleDelete, handleEdit, filterType, setFilterType, filterDoorName, setFilterDoorName }) {
@@ -91,7 +117,12 @@ function EntryCard({ e, deleteConfirm, setDeleteConfirm, handleDelete, handleEdi
                   </span>
                 )}
               </>
-            ) : EXPENSE_TYPES.find(t=>t.id===e.expType)?.label}
+            ) : (
+              <>
+                {EXPENSE_TYPES.find(t=>t.id===e.expType)?.label}
+                {e.fornecedor && <span style={{color:"#6b7280",fontSize:12,marginLeft:6}}>— {e.fornecedor}</span>}
+              </>
+            )}
           </div>
           {e.desc && <div style={s.entryDesc}>{e.desc}</div>}
           <div style={s.entryDate}>{formatDate(e.date)}</div>
@@ -112,6 +143,18 @@ function EntryCard({ e, deleteConfirm, setDeleteConfirm, handleDelete, handleEdi
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function MonthSeparator({ date }) {
+  const [y, m] = date.split("-");
+  const months = ["","JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET","OUT","NOV","DEZ"];
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:10,margin:"16px 0 10px"}}>
+      <div style={{flex:1,height:1,background:"#374151"}} />
+      <span style={{fontSize:11,color:"#6b7280",fontWeight:800,letterSpacing:1}}>{months[parseInt(m)]} / {y}</span>
+      <div style={{flex:1,height:1,background:"#374151"}} />
     </div>
   );
 }
@@ -138,6 +181,9 @@ function EspecieCard({ esp, st, onOpen, onDelete, formatBRLInt, formatBRL }) {
     </div>
   );
 
+  const totalQtd = st.qtdPort + st.qtdJan;
+  const margem = st.receita > 0 ? ((st.lucro / st.receita) * 100) : 0;
+
   return (
     <div
       {...longPress}
@@ -149,6 +195,16 @@ function EspecieCard({ esp, st, onOpen, onDelete, formatBRLInt, formatBRL }) {
       <div style={s.cardTop}>
         <span style={s.cardName}>{esp}</span>
         <span style={{...s.cardLucroVal, color:st.lucro>=0?"#22c55e":"#ff6b6b"}}>{st.lucro>=0?"↑":"↓"} {formatBRLInt(Math.abs(st.lucro))} ›</span>
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+        <span style={{fontSize:11,color:"#9ca3af",background:"#111827",padding:"3px 8px",borderRadius:6,fontWeight:600}}>
+          Margem: <span style={{color:st.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:800}}>{margem.toFixed(1)}%</span>
+        </span>
+        {totalQtd > 0 && (
+          <span style={{fontSize:11,color:"#9ca3af",background:"#111827",padding:"3px 8px",borderRadius:6,fontWeight:600}}>
+            Custo/un: {formatBRL(st.desp / totalQtd)}
+          </span>
+        )}
       </div>
       <div style={s.cardStatsRow}>
         <div style={s.cardStatCol}>
@@ -241,7 +297,7 @@ function App() {
   const [subTab, setSubTab] = useState("despesas");
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [saved, setSaved] = useState(false);
-  const [form, setForm] = useState({ type: "despesa", expType: "tora", especie: "", nome: "", desc: "", valor: "", qtd: "", valorUnit: "", m3: "", vrM3: "", date: today() });
+  const [form, setForm] = useState({ type: "despesa", expType: "tora", especie: "", nome: "", desc: "", fornecedor: "", valor: "", qtd: "", valorUnit: "", m3: "", vrM3: "", date: today() });
   const [theme, setTheme] = useState(THEMES[0]);
   const [headerVisible, setHeaderVisible] = useState(true);
   const lastScrollY = useRef(0);
@@ -249,8 +305,11 @@ function App() {
   const [editingId, setEditingId] = useState(null);
   const [filterType, setFilterType] = useState(null);
   const [filterDoorName, setFilterDoorName] = useState(null);
+  const [searchText, setSearchText] = useState("");
   const [renamingEspecie, setRenamingEspecie] = useState(false);
   const [renameValue, setRenameValue] = useState("");
+  const [formDirty, setFormDirty] = useState(false);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     try {
@@ -274,9 +333,49 @@ function App() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
+  useEffect(() => {
+    if (!formDirty) return;
+    const handler = (e) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [formDirty]);
+
   function persist(newData) {
     setData(newData);
     try { storage.set(STORAGE_KEY, JSON.stringify(newData)); } catch {}
+  }
+
+  function exportBackup() {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `portas-backup-${today()}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function importBackup(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const imported = JSON.parse(e.target.result);
+        if (imported && Array.isArray(imported.entries)) {
+          if (confirm(`Restaurar backup com ${imported.entries.length} lançamentos? Isso substituirá todos os dados atuais.`)) {
+            persist(imported);
+            alert("Backup restaurado com sucesso!");
+          }
+        } else {
+          alert("Arquivo inválido.");
+        }
+      } catch {
+        alert("Erro ao ler o arquivo.");
+      }
+    };
+    reader.readAsText(file);
   }
 
   function exportPDF() {
@@ -293,6 +392,7 @@ function App() {
     const allEspecies = [...new Set(data.entries.map(e => e.especie))].sort();
     const rows = allEspecies.map(esp => {
       const st = stats(esp);
+      const margem = st.receita > 0 ? ((st.lucro / st.receita) * 100).toFixed(1) + "%" : "0%";
       return [
         esp,
         `R$ ${st.desp.toLocaleString("pt-BR")}`,
@@ -300,21 +400,23 @@ function App() {
         st.qtdPort > 0 ? `${st.qtdPort} un` : "-",
         `R$ ${st.jan.toLocaleString("pt-BR")}`,
         st.qtdJan > 0 ? `${st.qtdJan} un` : "-",
-        st.lucro >= 0 ? `+ ${st.lucro.toLocaleString("pt-BR")}` : `- ${Math.abs(st.lucro).toLocaleString("pt-BR")}`
+        st.lucro >= 0 ? `+ ${st.lucro.toLocaleString("pt-BR")}` : `- ${Math.abs(st.lucro).toLocaleString("pt-BR")}`,
+        margem
       ];
     });
     doc.autoTable({
       startY: 80,
-      head: [["Espécie","Despesas","Portas R$","Portas Un","Janelas R$","Janelas Un","Lucro/Prejuízo"]],
+      head: [["Espécie","Despesas","Portas R$","Portas Un","Janelas R$","Janelas Un","Lucro/Prejuízo","Margem"]],
       body: rows,
       foot: [[
         "TOTAL",
         `R$ ${totalDesp.toLocaleString("pt-BR")}`,
         `R$ ${totalPort.toLocaleString("pt-BR")}`,
-        "",
+        `${totalQtdGeralPort} un`,
         `R$ ${totalJan.toLocaleString("pt-BR")}`,
-        "",
-        lucroGeral >= 0 ? `+ ${lucroGeral.toLocaleString("pt-BR")}` : `- ${Math.abs(lucroGeral).toLocaleString("pt-BR")}`
+        `${totalQtdGeralJan} un`,
+        lucroGeral >= 0 ? `+ ${lucroGeral.toLocaleString("pt-BR")}` : `- ${Math.abs(lucroGeral).toLocaleString("pt-BR")}`,
+        totalReceita > 0 ? ((lucroGeral / totalReceita) * 100).toFixed(1) + "%" : "0%"
       ]],
       styles:{ fontSize:9, cellPadding:6 },
       headStyles:{ fillColor:[255,255,255], textColor:[30,58,138], fontStyle:"bold", lineWidth:0.5, lineColor:[200,200,200] },
@@ -352,12 +454,13 @@ function App() {
     doc.line(40, 44, 555, 44);
 
     const st = statsAtiva;
+    const margem = st.receita > 0 ? ((st.lucro / st.receita) * 100).toFixed(1) + "%" : "0%";
     doc.setTextColor(60,60,60); doc.setFontSize(9);
     doc.text(`Despesas: R$ ${st.desp.toLocaleString("pt-BR")}   Portas: R$ ${st.port.toLocaleString("pt-BR")} (${st.qtdPort} un)   Janelas: R$ ${st.jan.toLocaleString("pt-BR")} (${st.qtdJan} un)`, 40, 58);
-    const lucroText = st.lucro >= 0 ? `Lucro: R$ ${st.lucro.toLocaleString("pt-BR")}` : `Prejuízo: R$ ${Math.abs(st.lucro).toLocaleString("pt-BR")}`;
+    const lucroText = st.lucro >= 0 ? `Lucro: R$ ${st.lucro.toLocaleString("pt-BR")}  |  Margem: ${margem}` : `Prejuízo: R$ ${Math.abs(st.lucro).toLocaleString("pt-BR")}`;
     doc.setFont("helvetica","bold");
     if (st.lucro >= 0) { doc.setTextColor(21, 128, 61); } else { doc.setTextColor(185, 28, 28); }
-    doc.text(lucroText, 40, 70);
+    doc.text(lucroText, 40, 72);
 
     const allEntries = data.entries
       .filter(e => e.especie === especieAtiva)
@@ -372,17 +475,19 @@ function App() {
       const tipo = e.type==="porta" ? "Porta" : e.type==="janela" ? "Janela" : EXPENSE_TYPES.find(t=>t.id===e.expType)?.label||"";
       const nome = e.nome||"";
       const desc = e.desc||"";
+      const forn = e.fornecedor || "";
       const parts = e.date.split("-");
       const dateShort = `${parts[2]}/${parts[1]}`;
       const qtd = e.qtd > 0 ? `${e.qtd}un` : "-";
       const val = e.type==="despesa"
         ? `- ${e.valor.toLocaleString("pt-BR")}`
         : `+ ${e.valor.toLocaleString("pt-BR")}`;
-      return [dateShort, tipo, nome||desc, qtd, val];
+      const detalhe = nome || desc || forn || "";
+      return [dateShort, tipo, detalhe, qtd, val];
     });
 
     doc.autoTable({
-      startY: 82,
+      startY: 84,
       head: [["Data","Tipo","Descrição","Qtd","Valor"]],
       body: rows,
       foot: [["", "", "", totalQtd > 0 ? `${totalQtd}un` : "",
@@ -445,18 +550,20 @@ function App() {
     if (editingId) {
       const newEntries = data.entries.map(e => e.id === editingId ? {
         ...e, type: form.type, expType: form.expType, especie,
-        nome: form.nome||"", desc: form.desc, valor,
+        nome: form.nome||"", desc: form.desc, fornecedor: form.fornecedor || "",
+        valor,
         qtd: (form.type === "porta" || form.type === "janela") ? parseInt(form.qtd) || 0 : 0,
         date: form.date
       } : e);
       persist({ entries: newEntries });
       setEditingId(null);
       setEspecieAtiva(especie);
-      setSubTab(form.type === "porta" ? "portas" : form.type === "janela" ? "janelas" : "despesas");
+      // Não muda de aba ao editar — mantém o usuário onde ele estava
     } else {
       const entry = {
         id: Date.now(), type: form.type, expType: form.expType,
-        especie, nome: form.nome||"", desc: form.desc, valor,
+        especie, nome: form.nome||"", desc: form.desc, fornecedor: form.fornecedor || "",
+        valor,
         qtd: (form.type === "porta" || form.type === "janela") ? parseInt(form.qtd) || 0 : 0,
         date: form.date,
       };
@@ -466,6 +573,7 @@ function App() {
     }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+    setFormDirty(false);
     setView("detail");
   }
 
@@ -488,12 +596,17 @@ function App() {
 
   function handleEdit(e) {
     setEditingId(e.id);
+    const qtd = e.qtd || 0;
+    const valor = e.valor || 0;
+    const valorUnit = (qtd > 0 && (e.type === "porta" || e.type === "janela")) ? String((valor / qtd).toFixed(2)) : "";
     setForm({
       type: e.type, expType: e.expType || "tora",
       especie: e.especie, nome: e.nome||"", desc: e.desc || "",
+      fornecedor: e.fornecedor || "",
       valor: String(e.valor), qtd: String(e.qtd || ""),
-      valorUnit: "", date: e.date
+      valorUnit: valorUnit, date: e.date
     });
+    setFormDirty(true);
     setView("form");
   }
 
@@ -509,7 +622,12 @@ function App() {
     const jan = data.entries.filter(e => e.especie === esp && e.type === "janela").reduce((s, e) => s + e.valor, 0);
     const qtdPort = data.entries.filter(e => e.especie === esp && e.type === "porta").reduce((s, e) => s + (e.qtd || 0), 0);
     const qtdJan = data.entries.filter(e => e.especie === esp && e.type === "janela").reduce((s, e) => s + (e.qtd || 0), 0);
-    return { desp, port, jan, receita: port + jan, lucro: port + jan - desp, qtdPort, qtdJan };
+    const receita = port + jan;
+    const lucro = receita - desp;
+    const totalQtd = qtdPort + qtdJan;
+    const custoUnit = totalQtd > 0 ? desp / totalQtd : 0;
+    const margemPct = receita > 0 ? (lucro / receita) * 100 : 0;
+    return { desp, port, jan, receita, lucro, qtdPort, qtdJan, totalQtd, custoUnit, margemPct };
   }
 
   const totalDesp = data.entries.filter(e => e.type === "despesa").reduce((s, e) => s + e.valor, 0);
@@ -517,10 +635,27 @@ function App() {
   const totalJan = data.entries.filter(e => e.type === "janela").reduce((s, e) => s + e.valor, 0);
   const totalReceita = totalPort + totalJan;
   const lucroGeral = totalReceita - totalDesp;
+  const totalQtdGeralPort = data.entries.filter(e => e.type === "porta").reduce((s, e) => s + (e.qtd || 0), 0);
+  const totalQtdGeralJan = data.entries.filter(e => e.type === "janela").reduce((s, e) => s + (e.qtd || 0), 0);
+  const totalQtdGeral = totalQtdGeralPort + totalQtdGeralJan;
 
-  const entriesAtivas = especieAtiva
-    ? data.entries.filter(e => e.especie === especieAtiva && e.type === (subTab === "portas" ? "porta" : subTab === "janelas" ? "janela" : "despesa") && (subTab !== "despesas" || !filterType || e.expType === filterType) && (!filterDoorName || e.nome === filterDoorName)).sort((a, b) => b.date.localeCompare(a.date))
-    : [];
+  const entriesAtivas = useMemo(() => {
+    if (!especieAtiva) return [];
+    const filtered = data.entries
+      .filter(e => e.especie === especieAtiva && e.type === (subTab === "portas" ? "porta" : subTab === "janelas" ? "janela" : "despesa")
+        && (subTab !== "despesas" || !filterType || e.expType === filterType)
+        && (!filterDoorName || e.nome === filterDoorName))
+      .sort((a, b) => b.date.localeCompare(a.date));
+
+    if (!searchText.trim()) return filtered;
+    const term = searchText.trim().toLowerCase();
+    return filtered.filter(e => 
+      (e.nome || "").toLowerCase().includes(term) ||
+      (e.desc || "").toLowerCase().includes(term) ||
+      (e.fornecedor || "").toLowerCase().includes(term) ||
+      String(e.valor).includes(term)
+    );
+  }, [data.entries, especieAtiva, subTab, filterType, filterDoorName, searchText]);
 
   const statsAtiva = especieAtiva ? stats(especieAtiva) : null;
 
@@ -530,14 +665,14 @@ function App() {
   if (view === "form") return (
     <div style={s.root}>
       <div style={{...s.header, background:`linear-gradient(135deg, ${theme.a} 0%, ${theme.b} 60%, ${theme.a}cc 100%)`}}>
-        <button style={s.backBtn} onClick={() => setView(especieAtiva ? "detail" : "list")}>‹</button>
+        <button style={s.backBtn} onClick={() => { if (formDirty && !confirm("Descartar alterações não salvas?")) return; setFormDirty(false); setView(especieAtiva ? "detail" : "list"); }}>‹</button>
         <span style={s.headerTitle}>{editingId ? "Editar Lançamento" : "Novo Lançamento"}</span>
       </div>
       <div style={s.page}>
         <div style={s.toggleRow}>
-          <button style={{...s.toggleBtn, ...(form.type==="despesa"?s.tOrange:{})}} onClick={() => setForm(f=>({...f,type:"despesa",valor:"",qtd:"",valorUnit:""}))}>💸 Despesa</button>
-          <button style={{...s.toggleBtn, ...(form.type==="porta"?s.tGreen:{})}} onClick={() => setForm(f=>({...f,type:"porta",valor:"",qtd:"",valorUnit:""}))}>🚪 Porta</button>
-          <button style={{...s.toggleBtn, ...(form.type==="janela"?s.tBlue:{})}} onClick={() => setForm(f=>({...f,type:"janela",valor:"",qtd:"",valorUnit:""}))}>🪟 Janela</button>
+          <button style={{...s.toggleBtn, ...(form.type==="despesa"?s.tOrange:{})}} onClick={() => { setForm(f=>({...f,type:"despesa",valor:"",qtd:"",valorUnit:""})); setFormDirty(true); }}>💸 Despesa</button>
+          <button style={{...s.toggleBtn, ...(form.type==="porta"?s.tGreen:{})}} onClick={() => { setForm(f=>({...f,type:"porta",valor:"",qtd:"",valorUnit:""})); setFormDirty(true); }}>🚪 Porta</button>
+          <button style={{...s.toggleBtn, ...(form.type==="janela"?s.tBlue:{})}} onClick={() => { setForm(f=>({...f,type:"janela",valor:"",qtd:"",valorUnit:""})); setFormDirty(true); }}>🪟 Janela</button>
         </div>
 
         {especieAtiva ? (
@@ -545,24 +680,27 @@ function App() {
         ) : (
           <>
             <div style={s.label}>Espécie da Madeira *</div>
-            <input style={s.input} type="text" placeholder="Ex: Amarelão, Jatobá..." value={form.especie} onChange={e => setForm(f=>({...f,especie:e.target.value}))} />
+            <input style={s.input} type="text" placeholder="Ex: Amarelão, Jatobá..." value={form.especie} onChange={e => { setForm(f=>({...f,especie:e.target.value})); setFormDirty(true); }} />
           </>
         )}
 
         <div style={s.label}>Data</div>
-        <input style={{...s.input, colorScheme:"dark"}} type="date" value={form.date} onChange={e => setForm(f=>({...f,date:e.target.value}))} />
+        <input style={{...s.input, colorScheme:"dark"}} type="date" value={form.date} onChange={e => { setForm(f=>({...f,date:e.target.value})); setFormDirty(true); }} />
 
         {form.type === "despesa" && (
           <>
             <div style={s.label}>Tipo de Despesa</div>
             <div style={s.expGrid}>
               {EXPENSE_TYPES.map(t => (
-                <button key={t.id} style={{...s.expBtn, ...(form.expType===t.id?s.expActive:{})}} onClick={() => setForm(f=>({...f,expType:t.id,m3:"",vrM3:"",valor:""}))}>
+                <button key={t.id} style={{...s.expBtn, ...(form.expType===t.id?s.expActive:{})}} onClick={() => { setForm(f=>({...f,expType:t.id,m3:"",vrM3:"",valor:""})); setFormDirty(true); }}>
                   <span style={{fontSize:16}}>{t.emoji}</span>
                   <span style={{fontSize:10,marginTop:2}}>{t.label}</span>
                 </button>
               ))}
             </div>
+
+            <div style={s.label}>Fornecedor (opcional)</div>
+            <input style={s.input} type="text" placeholder="Ex: Madeireira Silva" value={form.fornecedor} onChange={e => { setForm(f=>({...f,fornecedor:e.target.value})); setFormDirty(true); }} />
 
             {(form.expType==="tora"||form.expType==="madeira") && (
               <div style={s.m3Calc}>
@@ -577,9 +715,11 @@ function App() {
                       value={form.m3||""}
                       onChange={e => {
                         const m3 = e.target.value;
-                        const vr = parseFloat(String(form.vrM3||"").replace(",",".")) || 0;
-                        const total = m3 && vr ? String(parseFloat(m3)*vr) : form.valor;
+                        const m3Num = parseFloat(String(m3).replace(",",".")) || 0;
+                        const vrNum = parseFloat(String(form.vrM3||"").replace(",",".")) || 0;
+                        const total = (m3Num && vrNum) ? String((m3Num * vrNum).toFixed(2)) : form.valor;
                         setForm(f=>({...f, m3, valor: total}));
+                        setFormDirty(true);
                       }}
                     />
                   </div>
@@ -593,16 +733,18 @@ function App() {
                       value={form.vrM3||""}
                       onChange={e => {
                         const vr = e.target.value;
-                        const m3 = parseFloat(String(form.m3||"").replace(",",".")) || 0;
-                        const total = vr && m3 ? String(m3*parseFloat(vr)) : form.valor;
+                        const vrNum = parseFloat(String(vr).replace(",",".")) || 0;
+                        const m3Num = parseFloat(String(form.m3||"").replace(",",".")) || 0;
+                        const total = (vrNum && m3Num) ? String((m3Num * vrNum).toFixed(2)) : form.valor;
                         setForm(f=>({...f, vrM3: vr, valor: total}));
+                        setFormDirty(true);
                       }}
                     />
                   </div>
                 </div>
                 {(form.m3 && form.vrM3) && (
                   <div style={s.m3Result}>
-                    {parseFloat(form.m3||0).toLocaleString("pt-BR")} m³ × {formatBRL(parseFloat(form.vrM3||0))} = <strong style={{color:"#4ade80"}}>{formatBRL(parseFloat(form.m3||0)*parseFloat(form.vrM3||0))}</strong>
+                    {parseFloat(String(form.m3).replace(",",".")).toLocaleString("pt-BR")} m³ × {formatBRL(parseFloat(String(form.vrM3).replace(",",".")))} = <strong style={{color:"#4ade80"}}>{formatBRL(parseFloat(String(form.m3).replace(",","."))*parseFloat(String(form.vrM3).replace(",",".")))}</strong>
                   </div>
                 )}
               </div>
@@ -613,46 +755,50 @@ function App() {
         {(form.type === "porta" || form.type === "janela") && (
           <>
             <div style={s.label}>Nome da {form.type==="janela"?"Janela":"Porta"}</div>
-            <input style={s.input} type="text" placeholder="Ex: Americana, Tijolinho, Diagonal..." value={form.nome||""} onChange={e => setForm(f=>({...f,nome:e.target.value}))} />
+            <input style={s.input} type="text" placeholder="Ex: Americana, Tijolinho, Diagonal..." value={form.nome||""} onChange={e => { setForm(f=>({...f,nome:e.target.value})); setFormDirty(true); }} />
             <div style={s.label}>Quantidade de {form.type==="janela"?"Janelas":"Portas"}</div>
             <input style={s.input} type="number" inputMode="numeric" placeholder="Ex: 400" value={form.qtd}
               onChange={e => {
                 const qtd = e.target.value;
-                const unit = parseFloat(String(form.valorUnit||"").replace(",",".")) || 0;
-                setForm(f=>({...f, qtd, valor: (unit&&qtd)?String(unit*parseInt(qtd)):f.valor}));
+                const unitNum = parseFloat(String(form.valorUnit||"").replace(",",".")) || 0;
+                const qtdNum = parseInt(qtd) || 0;
+                setForm(f=>({...f, qtd, valor: (unitNum && qtdNum) ? String((unitNum * qtdNum).toFixed(2)) : f.valor}));
+                setFormDirty(true);
               }} />
             <div style={s.label}>Valor por {form.type==="janela"?"Janela":"Porta"} (R$)</div>
             <input style={s.input} type="number" inputMode="decimal" placeholder="Ex: 150" value={form.valorUnit||""}
               onChange={e => {
                 const unit = e.target.value;
-                const qtd = parseInt(form.qtd)||0;
-                setForm(f=>({...f, valorUnit:unit, valor:(unit&&qtd)?String(parseFloat(unit)*qtd):f.valor}));
+                const unitNum = parseFloat(String(unit).replace(",",".")) || 0;
+                const qtdNum = parseInt(form.qtd)||0;
+                setForm(f=>({...f, valorUnit:unit, valor:(unitNum && qtdNum) ? String((unitNum * qtdNum).toFixed(2)) : f.valor}));
+                setFormDirty(true);
               }} />
             {(form.qtd && form.valorUnit) && (
               <div style={s.calcPreview}>
-                {form.qtd} × {formatBRL(parseFloat(form.valorUnit||0))} = <strong>{formatBRL(parseFloat(form.valorUnit||0)*(parseInt(form.qtd)||0))}</strong>
+                {form.qtd} × {formatBRL(parseFloat(String(form.valorUnit||0).replace(",",".")))} = <strong>{formatBRL(parseFloat(String(form.valorUnit||0).replace(",","."))*(parseInt(form.qtd)||0))}</strong>
               </div>
             )}
             <div style={s.label}>Valor Total (R$) *</div>
-            <input style={s.input} type="number" inputMode="decimal" placeholder="Calculado automaticamente" value={form.valor} onChange={e => setForm(f=>({...f,valor:e.target.value}))} />
+            <input style={s.input} type="number" inputMode="decimal" placeholder="Calculado automaticamente" value={form.valor} onChange={e => { setForm(f=>({...f,valor:e.target.value})); setFormDirty(true); }} />
           </>
         )}
 
         {form.type === "despesa" && (
           <>
             <div style={s.label}>Valor (R$) *</div>
-            <input style={s.input} type="number" inputMode="decimal" placeholder="Ex: 50000" value={form.valor} onChange={e => setForm(f=>({...f,valor:e.target.value}))} />
+            <input style={s.input} type="number" inputMode="decimal" placeholder="Ex: 50000" value={form.valor} onChange={e => { setForm(f=>({...f,valor:e.target.value})); setFormDirty(true); }} />
           </>
         )}
 
         <div style={s.label}>Observação (opcional)</div>
-        <input style={s.input} type="text" placeholder="Ex: Fornecedor X" value={form.desc} onChange={e => setForm(f=>({...f,desc:e.target.value}))} />
+        <input style={s.input} type="text" placeholder="Ex: Nota fiscal 1234" value={form.desc} onChange={e => { setForm(f=>({...f,desc:e.target.value})); setFormDirty(true); }} />
 
         <button style={{...s.btnSave, opacity:(form.valor&&(especieAtiva||form.especie.trim()))?1:0.4}}
           onClick={handleAdd} disabled={!form.valor||(!especieAtiva&&!form.especie.trim())}>
           {editingId ? "✅ Salvar Edição" : "✅ Salvar Lançamento"}
         </button>
-        <button style={s.btnCancel} onClick={() => setView(especieAtiva?"detail":"list")}>Cancelar</button>
+        <button style={s.btnCancel} onClick={() => { if (formDirty && !confirm("Descartar alterações não salvas?")) return; setFormDirty(false); setView(especieAtiva?"detail":"list"); }}>Cancelar</button>
         <div style={{height:30}} />
       </div>
     </div>
@@ -717,19 +863,30 @@ function App() {
             <span style={{...s.detailLucroVal, color:statsAtiva.lucro>=0?"#22c55e":"#ff6b6b"}}>{formatBRLInt(Math.abs(statsAtiva.lucro))}</span>
           </div>
         </div>
+        <div style={{display:"flex",gap:8,justifyContent:"center",marginBottom:8,flexWrap:"wrap"}}>
+          <span style={{fontSize:11,color:"#9ca3af",background:"#111827",padding:"3px 8px",borderRadius:6,fontWeight:600}}>
+            Margem: <span style={{color:statsAtiva.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:800}}>{statsAtiva.margemPct.toFixed(1)}%</span>
+          </span>
+          {statsAtiva.totalQtd > 0 && (
+            <span style={{fontSize:11,color:"#9ca3af",background:"#111827",padding:"3px 8px",borderRadius:6,fontWeight:600}}>
+              Custo/un: {formatBRL(statsAtiva.custoUnit)}
+            </span>
+          )}
+        </div>
+        <BarChart desp={statsAtiva.desp} receita={statsAtiva.receita} lucro={statsAtiva.lucro} theme={theme} />
         <div style={s.detailRow2}>
           <button style={{...s.detailTabBtn, ...(subTab==="despesas"?{borderBottom:"2px solid #fb923c"}:{})}}
-            onClick={()=>{setSubTab("despesas");setFilterDoorName(null);}}>
+            onClick={()=>{setSubTab("despesas");setFilterDoorName(null);setSearchText("");}}>
             <span style={s.detailValLabel}>Despesas</span>
             <span style={{...s.detailValNum, color:"#ff6b6b"}}>{formatBRLInt(statsAtiva.desp)}</span>
           </button>
           <button style={{...s.detailTabBtn, ...(subTab==="portas"?{borderBottom:"2px solid #4ade80"}:{})}}
-            onClick={()=>{setSubTab("portas");setFilterDoorName(null);}}>
+            onClick={()=>{setSubTab("portas");setFilterDoorName(null);setSearchText("");}}>
             <span style={s.detailValLabel}>Portas</span>
             <span style={{...s.detailValNum, color:"#22c55e"}}>{formatBRLInt(statsAtiva.port)}</span>
           </button>
           <button style={{...s.detailTabBtn, ...(subTab==="janelas"?{borderBottom:"2px solid #60b4f7"}:{})}}
-            onClick={()=>{setSubTab("janelas");setFilterDoorName(null);}}>
+            onClick={()=>{setSubTab("janelas");setFilterDoorName(null);setSearchText("");}}>
             <span style={s.detailValLabel}>Janelas</span>
             <span style={{...s.detailValNum, color:"#60b4f7"}}>{formatBRLInt(statsAtiva.jan)}</span>
           </button>
@@ -737,6 +894,17 @@ function App() {
       </div>
 
       <div style={s.page}>
+        {entriesAtivas.length > 5 && (
+          <div style={{marginBottom:10}}>
+            <input
+              style={{...s.input, padding:"10px 12px", fontSize:14}}
+              type="text"
+              placeholder="🔍 Buscar nesta lista..."
+              value={searchText}
+              onChange={e => setSearchText(e.target.value)}
+            />
+          </div>
+        )}
         {filterDoorName && (
           <div style={s.filterActiveBar}>
             Filtrando: <strong>{filterDoorName}</strong>
@@ -745,15 +913,28 @@ function App() {
         )}
         {entriesAtivas.length===0 ? (
           <div style={s.emptySmall}>Nenhum lançamento de {subTab} para {especieAtiva}.</div>
-        ) : entriesAtivas.map(e => (
-          <EntryCard
-            key={e.id} e={e}
-            deleteConfirm={deleteConfirm} setDeleteConfirm={setDeleteConfirm}
-            handleDelete={handleDelete} handleEdit={handleEdit}
-            filterType={filterType} setFilterType={setFilterType}
-            filterDoorName={filterDoorName} setFilterDoorName={setFilterDoorName}
-          />
-        ))}
+        ) : (
+          (() => {
+            let lastMonth = "";
+            return entriesAtivas.map(e => {
+              const month = e.date.slice(0, 7);
+              const showMonth = month !== lastMonth;
+              lastMonth = month;
+              return (
+                <React.Fragment key={e.id}>
+                  {showMonth && <MonthSeparator date={e.date} />}
+                  <EntryCard
+                    e={e}
+                    deleteConfirm={deleteConfirm} setDeleteConfirm={setDeleteConfirm}
+                    handleDelete={handleDelete} handleEdit={handleEdit}
+                    filterType={filterType} setFilterType={setFilterType}
+                    filterDoorName={filterDoorName} setFilterDoorName={setFilterDoorName}
+                  />
+                </React.Fragment>
+              );
+            });
+          })()
+        )}
       </div>
       <div style={s.fabAreaRight}>
         <div style={s.fabMiniRow}>
@@ -762,7 +943,8 @@ function App() {
         </div>
         <button style={s.fabSmall} onClick={() => {
           setEditingId(null);
-          setForm(f=>({...f, especie:especieAtiva, type:subTab==="portas"?"porta":subTab==="janelas"?"janela":"despesa", valor:"", qtd:"", valorUnit:"", m3:"", vrM3:"", desc:"", date:today()}));
+          setForm(f=>({...f, especie:especieAtiva, type:subTab==="portas"?"porta":subTab==="janelas"?"janela":"despesa", valor:"", qtd:"", valorUnit:"", m3:"", vrM3:"", desc:"", fornecedor:"", date:today()}));
+          setFormDirty(false);
           setView("form");
         }}>+</button>
       </div>
@@ -791,6 +973,11 @@ function App() {
             <div style={{...s.cardBrancoVal, color: lucroGeral>=0?"#22c55e":"#ff6b6b"}}>
               {formatBRLInt(Math.abs(lucroGeral))}
             </div>
+            {totalQtdGeral > 0 && (
+              <div style={{fontSize:11,color:"#9ca3af",marginTop:4}}>
+                {totalQtdGeral} un vendidas · {formatBRL(lucroGeral / totalQtdGeral)}/un
+              </div>
+            )}
           </div>
         </div>
 
@@ -839,13 +1026,28 @@ function App() {
         <div style={s.listPage}>
           <div style={s.resumoCard}>
             <div style={s.resumoRow}><span style={s.resumoLabel}>Total Despesas</span><span style={{...s.resumoVal,color:"#ff6b6b"}}>{formatBRL(totalDesp)}</span></div>
-            <div style={s.resumoRow}><span style={s.resumoLabel}>🚪 Total Portas</span><span style={{...s.resumoVal,color:"#22c55e"}}>{formatBRL(totalPort)}</span></div>
-            <div style={s.resumoRow}><span style={s.resumoLabel}>🪟 Total Janelas</span><span style={{...s.resumoVal,color:"#60b4f7"}}>{formatBRL(totalJan)}</span></div>
+            <div style={s.resumoRow}><span style={s.resumoLabel}>🚪 Total Portas</span><span style={{...s.resumoVal,color:"#22c55e"}}>{formatBRL(totalPort)} {totalQtdGeralPort>0&&`(${totalQtdGeralPort} un)`}</span></div>
+            <div style={s.resumoRow}><span style={s.resumoLabel}>🪟 Total Janelas</span><span style={{...s.resumoVal,color:"#60b4f7"}}>{formatBRL(totalJan)} {totalQtdGeralJan>0&&`(${totalQtdGeralJan} un)`}</span></div>
             <div style={{...s.resumoRow,borderTop:"1px solid #333",paddingTop:12,marginTop:4}}>
               <span style={{...s.resumoLabel,fontWeight:800,color:"#fff"}}>{lucroGeral>=0?"Lucro":"Prejuízo"}</span>
               <span style={{...s.resumoVal,color:lucroGeral>=0?"#22c55e":"#ff6b6b",fontWeight:900,fontSize:22}}>{formatBRL(Math.abs(lucroGeral))}</span>
             </div>
+            {totalQtdGeral > 0 && (
+              <div style={{...s.resumoRow,marginTop:4}}>
+                <span style={{...s.resumoLabel,color:"#6b7280"}}>Lucro médio por unidade</span>
+                <span style={{...s.resumoVal,color:lucroGeral>=0?"#22c55e":"#ff6b6b",fontSize:16}}>{formatBRL(lucroGeral / totalQtdGeral)}</span>
+              </div>
+            )}
           </div>
+
+          <div style={{display:"flex",gap:10,marginBottom:16}}>
+            <button style={{flex:1,background:"#1f2937",border:"1.5px solid #374151",borderRadius:12,padding:"12px",color:"#e5e7eb",fontWeight:700,fontSize:13,cursor:"pointer"}}
+              onClick={exportBackup}>💾 Exportar Backup</button>
+            <button style={{flex:1,background:"#1f2937",border:"1.5px solid #374151",borderRadius:12,padding:"12px",color:"#e5e7eb",fontWeight:700,fontSize:13,cursor:"pointer"}}
+              onClick={()=>fileInputRef.current?.click()}>📁 Restaurar Backup</button>
+            <input ref={fileInputRef} type="file" accept=".json" style={{display:"none"}} onChange={e => { if(e.target.files[0]) importBackup(e.target.files[0]); e.target.value=""; }} />
+          </div>
+
           {especies.length>0 && (
             <>
               <div style={s.resumoSectionTitle}>Por Espécie</div>
@@ -857,6 +1059,12 @@ function App() {
                     <div style={s.resumoRow}><span style={s.resumoLabel}>Despesas</span><span style={{color:"#ff6b6b",fontWeight:600}}>{formatBRL(st.desp)}</span></div>
                     <div style={s.resumoRow}><span style={s.resumoLabel}>🚪 Portas{st.qtdPort>0?` (${st.qtdPort} un)`:""}</span><span style={{color:"#22c55e",fontWeight:600}}>{formatBRL(st.port)}</span></div>
                     <div style={s.resumoRow}><span style={s.resumoLabel}>🪟 Janelas{st.qtdJan>0?` (${st.qtdJan} un)`:""}</span><span style={{color:"#60b4f7",fontWeight:600}}>{formatBRL(st.jan)}</span></div>
+                    {st.totalQtd > 0 && (
+                      <div style={s.resumoRow}>
+                        <span style={{...s.resumoLabel,color:"#6b7280"}}>Custo/un · Margem</span>
+                        <span style={{color:"#9ca3af",fontWeight:600,fontSize:13}}>{formatBRL(st.custoUnit)} · {st.margemPct.toFixed(1)}%</span>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -870,7 +1078,7 @@ function App() {
           <button style={s.fabMiniBtn} onClick={exportPDF} title="Exportar PDF">📄</button>
           <button style={s.fabMiniBtn} onClick={()=>setShowThemePicker(p=>!p)} title="Cor">🎨</button>
         </div>
-        <button style={s.fabSmall} onClick={()=>{setEspecieAtiva(null);setEditingId(null);setForm({type:"despesa",expType:"tora",especie:"",desc:"",valor:"",qtd:"",valorUnit:"",m3:"",vrM3:"",date:today()});setView("form");}}>+</button>
+        <button style={s.fabSmall} onClick={()=>{setEspecieAtiva(null);setEditingId(null);setForm({type:"despesa",expType:"tora",especie:"",nome:"",desc:"",fornecedor:"",valor:"",qtd:"",valorUnit:"",m3:"",vrM3:"",date:today()});setFormDirty(false);setView("form");}}>+</button>
       </div>
     </div>
   );
