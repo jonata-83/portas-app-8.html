@@ -1,5 +1,4 @@
-
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
@@ -27,7 +26,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.6.0/jspdf.plugin.autotable.min.js"></script>
 <script type="text/babel">
 const { useState, useEffect, useRef, useMemo } = React;
-const STORAGE_KEY = "portas-app-v11";
+const STORAGE_KEY = "portas-app-v12";
 
 function useLongPress(onLongPress, ms = 550) {
   const timerRef = useRef(null);
@@ -125,6 +124,7 @@ function EntryCard({ e, deleteConfirm, setDeleteConfirm, handleDelete, handleEdi
               </>
             )}
           </div>
+          {e.marceneiro && <div style={{fontSize:12,color:"#fbbf24",marginTop:3,fontWeight:600}}>👷 {e.marceneiro}</div>}
           {e.desc && <div style={s.entryDesc}>{e.desc}</div>}
           {e.type==="despesa" && e.volM3 > 0 && (
             <div style={{fontSize:12,color:"#60b4f7",marginTop:3,fontWeight:600}}>
@@ -303,7 +303,7 @@ function App() {
   const [subTab, setSubTab] = useState("despesas");
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [saved, setSaved] = useState(false);
-  const [form, setForm] = useState({ type: "despesa", expType: "tora", especie: "", nome: "", desc: "", fornecedor: "", valor: "", qtd: "", valorUnit: "", m3: "", vrM3: "", date: today() });
+  const [form, setForm] = useState({ type: "despesa", expType: "tora", especie: "", nome: "", desc: "", fornecedor: "", marceneiro: "", valor: "", qtd: "", valorUnit: "", m3: "", vrM3: "", date: today() });
   const [theme, setTheme] = useState(THEMES[0]);
   const [headerVisible, setHeaderVisible] = useState(true);
   const lastScrollY = useRef(0);
@@ -480,6 +480,7 @@ function App() {
     const rows = allEntries.map(e => {
       const tipo = e.type==="porta" ? "Porta" : e.type==="janela" ? "Janela" : EXPENSE_TYPES.find(t=>t.id===e.expType)?.label||"";
       const nome = e.nome||"";
+      const marc = e.marceneiro || "";
       const desc = e.desc||"";
       const forn = e.fornecedor || "";
       const parts = e.date.split("-");
@@ -488,7 +489,7 @@ function App() {
       const val = e.type==="despesa"
         ? `- ${e.valor.toLocaleString("pt-BR")}`
         : `+ ${e.valor.toLocaleString("pt-BR")}`;
-      const detalhe = nome || desc || forn || "";
+      const detalhe = nome || marc || desc || forn || "";
       return [dateShort, tipo, detalhe, qtd, val];
     });
 
@@ -565,6 +566,7 @@ function App() {
       const newEntries = data.entries.map(e => e.id === editingId ? {
         ...e, type: form.type, expType: form.expType, especie,
         nome: form.nome||"", desc: form.desc, fornecedor: form.fornecedor || "",
+        marceneiro: form.marceneiro || "",
         valor,
         qtd: (form.type === "porta" || form.type === "janela") ? parseInt(form.qtd) || 0 : 0,
         date: form.date,
@@ -578,6 +580,7 @@ function App() {
       const entry = {
         id: Date.now(), type: form.type, expType: form.expType,
         especie, nome: form.nome||"", desc: form.desc, fornecedor: form.fornecedor || "",
+        marceneiro: form.marceneiro || "",
         valor,
         qtd: (form.type === "porta" || form.type === "janela") ? parseInt(form.qtd) || 0 : 0,
         date: form.date,
@@ -622,6 +625,7 @@ function App() {
       type: e.type, expType: e.expType || "tora",
       especie: e.especie, nome: e.nome||"", desc: e.desc || "",
       fornecedor: e.fornecedor || "",
+      marceneiro: e.marceneiro || "",
       valor: String(e.valor), qtd: String(e.qtd || ""),
       valorUnit: valorUnit,
       m3: m3,
@@ -675,6 +679,7 @@ function App() {
       (e.nome || "").toLowerCase().includes(term) ||
       (e.desc || "").toLowerCase().includes(term) ||
       (e.fornecedor || "").toLowerCase().includes(term) ||
+      (e.marceneiro || "").toLowerCase().includes(term) ||
       String(e.valor).includes(term)
     );
   }, [data.entries, especieAtiva, subTab, filterType, filterDoorName, searchText]);
@@ -724,7 +729,6 @@ function App() {
             <div style={s.label}>Fornecedor (opcional)</div>
             <input style={s.input} type="text" placeholder="Ex: Serraria Vitória" value={form.fornecedor} onChange={e => { setForm(f=>({...f,fornecedor:e.target.value})); setFormDirty(true); }} />
 
-            {/* CALCULADORA M³ PARA TORA / MADEIRA / SERRAGEM */}
             {(form.expType==="tora"||form.expType==="madeira"||form.expType==="serragem") && (
               <div style={s.m3Calc}>
                 <div style={s.m3CalcTitle}>📐 Calculadora M³ — {EXPENSE_TYPES.find(t=>t.id===form.expType)?.label}</div>
@@ -804,6 +808,12 @@ function App() {
             )}
             <div style={s.label}>Valor Total (R$) *</div>
             <input style={s.input} type="number" inputMode="decimal" placeholder="Calculado automaticamente" value={form.valor} onChange={e => { setForm(f=>({...f,valor:e.target.value})); setFormDirty(true); }} />
+
+            <div style={s.label}>Marceneiro</div>
+            <input style={s.input} type="text" placeholder="Ex: João, Pedro..." value={form.marceneiro||""} onChange={e => { setForm(f=>({...f,marceneiro:e.target.value})); setFormDirty(true); }} />
+
+            <div style={s.label}>Observação (opcional)</div>
+            <input style={s.input} type="text" placeholder="Ex: Cliente João" value={form.desc} onChange={e => { setForm(f=>({...f,desc:e.target.value})); setFormDirty(true); }} />
           </>
         )}
 
@@ -811,14 +821,6 @@ function App() {
           <>
             <div style={s.label}>Valor (R$) *</div>
             <input style={s.input} type="number" inputMode="decimal" placeholder="Ex: 50000" value={form.valor} onChange={e => { setForm(f=>({...f,valor:e.target.value})); setFormDirty(true); }} />
-          </>
-        )}
-
-        {/* Observação só aparece para Portas e Janelas */}
-        {(form.type === "porta" || form.type === "janela") && (
-          <>
-            <div style={s.label}>Observação (opcional)</div>
-            <input style={s.input} type="text" placeholder="Ex: Cliente João" value={form.desc} onChange={e => { setForm(f=>({...f,desc:e.target.value})); setFormDirty(true); }} />
           </>
         )}
 
@@ -971,7 +973,7 @@ function App() {
         </div>
         <button style={s.fabSmall} onClick={() => {
           setEditingId(null);
-          setForm(f=>({...f, especie:especieAtiva, type:subTab==="portas"?"porta":subTab==="janelas"?"janela":"despesa", valor:"", qtd:"", valorUnit:"", m3:"", vrM3:"", desc:"", fornecedor:"", date:today()}));
+          setForm(f=>({...f, especie:especieAtiva, type:subTab==="portas"?"porta":subTab==="janelas"?"janela":"despesa", valor:"", qtd:"", valorUnit:"", m3:"", vrM3:"", desc:"", fornecedor:"", marceneiro:"", date:today()}));
           setFormDirty(false);
           setView("form");
         }}>+</button>
@@ -1106,7 +1108,7 @@ function App() {
           <button style={s.fabMiniBtn} onClick={exportPDF} title="Exportar PDF">📄</button>
           <button style={s.fabMiniBtn} onClick={()=>setShowThemePicker(p=>!p)} title="Cor">🎨</button>
         </div>
-        <button style={s.fabSmall} onClick={()=>{setEspecieAtiva(null);setEditingId(null);setForm({type:"despesa",expType:"tora",especie:"",nome:"",desc:"",fornecedor:"",valor:"",qtd:"",valorUnit:"",m3:"",vrM3:"",date:today()});setFormDirty(false);setView("form");}}>+</button>
+        <button style={s.fabSmall} onClick={()=>{setEspecieAtiva(null);setEditingId(null);setForm({type:"despesa",expType:"tora",especie:"",nome:"",desc:"",fornecedor:"",marceneiro:"",valor:"",qtd:"",valorUnit:"",m3:"",vrM3:"",date:today()});setFormDirty(false);setView("form");}}>+</button>
       </div>
     </div>
   );
