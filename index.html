@@ -1,4 +1,5 @@
- <!DOCTYPE html>
+
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
@@ -26,7 +27,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.6.0/jspdf.plugin.autotable.min.js"></script>
 <script type="text/babel">
 const { useState, useEffect, useRef, useMemo } = React;
-const STORAGE_KEY = "portas-app-v9";
+const STORAGE_KEY = "portas-app-v11";
 
 function useLongPress(onLongPress, ms = 550) {
   const timerRef = useRef(null);
@@ -125,6 +126,11 @@ function EntryCard({ e, deleteConfirm, setDeleteConfirm, handleDelete, handleEdi
             )}
           </div>
           {e.desc && <div style={s.entryDesc}>{e.desc}</div>}
+          {e.type==="despesa" && e.volM3 > 0 && (
+            <div style={{fontSize:12,color:"#60b4f7",marginTop:3,fontWeight:600}}>
+              📐 {e.volM3.toFixed(3)} m³ {e.vrM3 > 0 && `× ${formatBRL(e.vrM3)}/m³`}
+            </div>
+          )}
           <div style={s.entryDate}>{formatDate(e.date)}</div>
         </div>
       </div>
@@ -547,18 +553,27 @@ function App() {
     const valor = parseFloat(String(form.valor).replace(",", "."));
     if (!valor || isNaN(valor) || (!especieAtiva && !form.especie.trim())) return;
     const especie = (especieAtiva || form.especie.trim()).toUpperCase();
+
+    let volM3 = 0;
+    let vrM3Val = 0;
+    if (form.type === "despesa" && (form.expType === "tora" || form.expType === "madeira" || form.expType === "serragem")) {
+      volM3 = parseFloat(String(form.m3||"").replace(",",".")) || 0;
+      vrM3Val = parseFloat(String(form.vrM3||"").replace(",",".")) || 0;
+    }
+
     if (editingId) {
       const newEntries = data.entries.map(e => e.id === editingId ? {
         ...e, type: form.type, expType: form.expType, especie,
         nome: form.nome||"", desc: form.desc, fornecedor: form.fornecedor || "",
         valor,
         qtd: (form.type === "porta" || form.type === "janela") ? parseInt(form.qtd) || 0 : 0,
-        date: form.date
+        date: form.date,
+        volM3: volM3 || undefined,
+        vrM3: vrM3Val || undefined,
       } : e);
       persist({ entries: newEntries });
       setEditingId(null);
       setEspecieAtiva(especie);
-      // Não muda de aba ao editar — mantém o usuário onde ele estava
     } else {
       const entry = {
         id: Date.now(), type: form.type, expType: form.expType,
@@ -566,6 +581,8 @@ function App() {
         valor,
         qtd: (form.type === "porta" || form.type === "janela") ? parseInt(form.qtd) || 0 : 0,
         date: form.date,
+        volM3: volM3 || undefined,
+        vrM3: vrM3Val || undefined,
       };
       persist({ entries: [entry, ...data.entries] });
       setEspecieAtiva(entry.especie);
@@ -599,12 +616,17 @@ function App() {
     const qtd = e.qtd || 0;
     const valor = e.valor || 0;
     const valorUnit = (qtd > 0 && (e.type === "porta" || e.type === "janela")) ? String((valor / qtd).toFixed(2)) : "";
+    const m3 = e.volM3 ? String(e.volM3) : "";
+
     setForm({
       type: e.type, expType: e.expType || "tora",
       especie: e.especie, nome: e.nome||"", desc: e.desc || "",
       fornecedor: e.fornecedor || "",
       valor: String(e.valor), qtd: String(e.qtd || ""),
-      valorUnit: valorUnit, date: e.date
+      valorUnit: valorUnit,
+      m3: m3,
+      vrM3: e.vrM3 ? String(e.vrM3) : "",
+      date: e.date
     });
     setFormDirty(true);
     setView("form");
@@ -700,18 +722,19 @@ function App() {
             </div>
 
             <div style={s.label}>Fornecedor (opcional)</div>
-            <input style={s.input} type="text" placeholder="Ex: Madeireira Silva" value={form.fornecedor} onChange={e => { setForm(f=>({...f,fornecedor:e.target.value})); setFormDirty(true); }} />
+            <input style={s.input} type="text" placeholder="Ex: Serraria Vitória" value={form.fornecedor} onChange={e => { setForm(f=>({...f,fornecedor:e.target.value})); setFormDirty(true); }} />
 
-            {(form.expType==="tora"||form.expType==="madeira") && (
+            {/* CALCULADORA M³ PARA TORA / MADEIRA / SERRAGEM */}
+            {(form.expType==="tora"||form.expType==="madeira"||form.expType==="serragem") && (
               <div style={s.m3Calc}>
-                <div style={s.m3CalcTitle}>📐 Calculadora M³</div>
+                <div style={s.m3CalcTitle}>📐 Calculadora M³ — {EXPENSE_TYPES.find(t=>t.id===form.expType)?.label}</div>
                 <div style={s.m3Row}>
                   <div style={s.m3Col}>
                     <span style={s.m3Label}>Quantidade (m³)</span>
                     <input
                       style={s.m3Input}
                       type="number" inputMode="decimal"
-                      placeholder="Ex: 1.200"
+                      placeholder="Ex: 10"
                       value={form.m3||""}
                       onChange={e => {
                         const m3 = e.target.value;
@@ -729,7 +752,7 @@ function App() {
                     <input
                       style={s.m3Input}
                       type="number" inputMode="decimal"
-                      placeholder="Ex: 600"
+                      placeholder={form.expType==="serragem"?"Ex: 220":"Ex: 600"}
                       value={form.vrM3||""}
                       onChange={e => {
                         const vr = e.target.value;
@@ -791,8 +814,13 @@ function App() {
           </>
         )}
 
-        <div style={s.label}>Observação (opcional)</div>
-        <input style={s.input} type="text" placeholder="Ex: Nota fiscal 1234" value={form.desc} onChange={e => { setForm(f=>({...f,desc:e.target.value})); setFormDirty(true); }} />
+        {/* Observação só aparece para Portas e Janelas */}
+        {(form.type === "porta" || form.type === "janela") && (
+          <>
+            <div style={s.label}>Observação (opcional)</div>
+            <input style={s.input} type="text" placeholder="Ex: Cliente João" value={form.desc} onChange={e => { setForm(f=>({...f,desc:e.target.value})); setFormDirty(true); }} />
+          </>
+        )}
 
         <button style={{...s.btnSave, opacity:(form.valor&&(especieAtiva||form.especie.trim()))?1:0.4}}
           onClick={handleAdd} disabled={!form.valor||(!especieAtiva&&!form.especie.trim())}>
