@@ -1,4 +1,4 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
@@ -26,7 +26,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.6.0/jspdf.plugin.autotable.min.js"></script>
 <script type="text/babel">
 const { useState, useEffect, useRef, useMemo } = React;
-const STORAGE_KEY = "portas-app-v12";
+const STORAGE_KEY = "portas-app-v13";
 
 function useLongPress(onLongPress, ms = 550) {
   const timerRef = useRef(null);
@@ -665,6 +665,17 @@ function App() {
   const totalQtdGeralJan = data.entries.filter(e => e.type === "janela").reduce((s, e) => s + (e.qtd || 0), 0);
   const totalQtdGeral = totalQtdGeralPort + totalQtdGeralJan;
 
+  // Total de entradas na aba atual (SEM filtro de texto) — usado pra decidir se mostra busca
+  const totalEntriesInTab = useMemo(() => {
+    if (!especieAtiva) return 0;
+    return data.entries.filter(e =>
+      e.especie === especieAtiva &&
+      e.type === (subTab === "portas" ? "porta" : subTab === "janelas" ? "janela" : "despesa") &&
+      (subTab !== "despesas" || !filterType || e.expType === filterType) &&
+      (!filterDoorName || e.nome === filterDoorName)
+    ).length;
+  }, [data.entries, especieAtiva, subTab, filterType, filterDoorName]);
+
   const entriesAtivas = useMemo(() => {
     if (!especieAtiva) return [];
     const filtered = data.entries
@@ -924,7 +935,8 @@ function App() {
       </div>
 
       <div style={s.page}>
-        {entriesAtivas.length > 5 && (
+        {/* CORREÇÃO: usa totalEntriesInTab em vez de entriesAtivas.length */}
+        {totalEntriesInTab > 5 && (
           <div style={{marginBottom:10}}>
             <input
               style={{...s.input, padding:"10px 12px", fontSize:14}}
