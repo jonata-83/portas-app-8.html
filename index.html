@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
@@ -26,7 +26,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.6.0/jspdf.plugin.autotable.min.js"></script>
 <script type="text/babel">
 const { useState, useEffect, useRef, useMemo } = React;
-const STORAGE_KEY = "portas-app-v13";
+const STORAGE_KEY = "portas-app-v15";
 
 function useLongPress(onLongPress, ms = 550) {
   const timerRef = useRef(null);
@@ -44,21 +44,21 @@ function BarChart({ desp, receita, lucro, theme }) {
   const hLuc = (Math.abs(lucro) / max) * 100;
   const lucColor = lucro >= 0 ? "#22c55e" : "#ff6b6b";
   return (
-    <div style={{display:"flex",alignItems:"flex-end",justifyContent:"center",gap:14,height:90,margin:"14px 0 6px"}}>
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-        <span style={{fontSize:10,color:"#9ca3af",fontWeight:700}}>{formatShortNum(desp)}</span>
-        <div style={{width:32,height:`${hDesp}%`,background:"#ff6b6b",borderRadius:"6px 6px 0 0",minHeight:4,transition:"height 0.6s ease"}} />
-        <span style={{fontSize:9,color:"#ff6b6b",fontWeight:700}}>Desp</span>
+    <div style={{display:"flex",alignItems:"flex-end",justifyContent:"center",gap:20,height:130,margin:"4px 0 4px"}}>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
+        <span style={{fontSize:12,color:"#9ca3af",fontWeight:700}}>{formatShortNum(desp)}</span>
+        <div style={{width:42,height:`${hDesp}%`,background:"#ff6b6b",borderRadius:"8px 8px 0 0",minHeight:6,transition:"height 0.6s ease"}} />
+        <span style={{fontSize:11,color:"#ff6b6b",fontWeight:700}}>Desp</span>
       </div>
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-        <span style={{fontSize:10,color:"#9ca3af",fontWeight:700}}>{formatShortNum(receita)}</span>
-        <div style={{width:32,height:`${hRec}%`,background:"#22c55e",borderRadius:"6px 6px 0 0",minHeight:4,transition:"height 0.6s ease"}} />
-        <span style={{fontSize:9,color:"#22c55e",fontWeight:700}}>Rec</span>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
+        <span style={{fontSize:12,color:"#9ca3af",fontWeight:700}}>{formatShortNum(receita)}</span>
+        <div style={{width:42,height:`${hRec}%`,background:"#22c55e",borderRadius:"8px 8px 0 0",minHeight:6,transition:"height 0.6s ease"}} />
+        <span style={{fontSize:11,color:"#22c55e",fontWeight:700}}>Rec</span>
       </div>
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-        <span style={{fontSize:10,color:"#9ca3af",fontWeight:700}}>{formatShortNum(Math.abs(lucro))}</span>
-        <div style={{width:32,height:`${hLuc}%`,background:lucColor,borderRadius:"6px 6px 0 0",minHeight:4,transition:"height 0.6s ease"}} />
-        <span style={{fontSize:9,color:lucColor,fontWeight:700}}>{lucro>=0?"Luc":"Prej"}</span>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
+        <span style={{fontSize:12,color:"#9ca3af",fontWeight:700}}>{formatShortNum(Math.abs(lucro))}</span>
+        <div style={{width:42,height:`${hLuc}%`,background:lucColor,borderRadius:"8px 8px 0 0",minHeight:6,transition:"height 0.6s ease"}} />
+        <span style={{fontSize:11,color:lucColor,fontWeight:700}}>{lucro>=0?"Luc":"Prej"}</span>
       </div>
     </div>
   );
@@ -203,12 +203,12 @@ function EspecieCard({ esp, st, onOpen, onDelete, formatBRLInt, formatBRL }) {
         <span style={{...s.cardLucroVal, color:st.lucro>=0?"#22c55e":"#ff6b6b"}}>{st.lucro>=0?"↑":"↓"} {formatBRLInt(Math.abs(st.lucro))} ›</span>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
-        <span style={{fontSize:11,color:"#9ca3af",background:"#111827",padding:"3px 8px",borderRadius:6,fontWeight:600}}>
-          Margem: <span style={{color:st.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:800}}>{margem.toFixed(1)}%</span>
+        <span style={{fontSize:13,color:"#9ca3af",background:"#111827",padding:"5px 12px",borderRadius:8,fontWeight:700}}>
+          Margem: <span style={{color:st.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:900}}>{margem.toFixed(1)}%</span>
         </span>
         {totalQtd > 0 && (
-          <span style={{fontSize:11,color:"#9ca3af",background:"#111827",padding:"3px 8px",borderRadius:6,fontWeight:600}}>
-            Custo/un: {formatBRL(st.desp / totalQtd)}
+          <span style={{fontSize:13,color:"#9ca3af",background:"#111827",padding:"5px 12px",borderRadius:8,fontWeight:700}}>
+            Custo/un: <span style={{color:"#e5e7eb",fontWeight:800}}>{formatBRL(st.desp / totalQtd)}</span>
           </span>
         )}
       </div>
@@ -665,7 +665,6 @@ function App() {
   const totalQtdGeralJan = data.entries.filter(e => e.type === "janela").reduce((s, e) => s + (e.qtd || 0), 0);
   const totalQtdGeral = totalQtdGeralPort + totalQtdGeralJan;
 
-  // Total de entradas na aba atual (SEM filtro de texto) — usado pra decidir se mostra busca
   const totalEntriesInTab = useMemo(() => {
     if (!especieAtiva) return 0;
     return data.entries.filter(e =>
@@ -904,13 +903,13 @@ function App() {
             <span style={{...s.detailLucroVal, color:statsAtiva.lucro>=0?"#22c55e":"#ff6b6b"}}>{formatBRLInt(Math.abs(statsAtiva.lucro))}</span>
           </div>
         </div>
-        <div style={{display:"flex",gap:8,justifyContent:"center",marginBottom:8,flexWrap:"wrap"}}>
-          <span style={{fontSize:11,color:"#9ca3af",background:"#111827",padding:"3px 8px",borderRadius:6,fontWeight:600}}>
-            Margem: <span style={{color:statsAtiva.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:800}}>{statsAtiva.margemPct.toFixed(1)}%</span>
+        <div style={{display:"flex",gap:10,justifyContent:"center",marginBottom:4,flexWrap:"wrap"}}>
+          <span style={{fontSize:14,color:"#9ca3af",background:"#111827",padding:"6px 14px",borderRadius:8,fontWeight:700}}>
+            Margem: <span style={{color:statsAtiva.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:900,fontSize:15}}>{statsAtiva.margemPct.toFixed(1)}%</span>
           </span>
           {statsAtiva.totalQtd > 0 && (
-            <span style={{fontSize:11,color:"#9ca3af",background:"#111827",padding:"3px 8px",borderRadius:6,fontWeight:600}}>
-              Custo/un: {formatBRL(statsAtiva.custoUnit)}
+            <span style={{fontSize:14,color:"#9ca3af",background:"#111827",padding:"6px 14px",borderRadius:8,fontWeight:700}}>
+              Custo/un: <span style={{color:"#e5e7eb",fontWeight:900,fontSize:15}}>{formatBRL(statsAtiva.custoUnit)}</span>
             </span>
           )}
         </div>
@@ -935,7 +934,6 @@ function App() {
       </div>
 
       <div style={s.page}>
-        {/* CORREÇÃO: usa totalEntriesInTab em vez de entriesAtivas.length */}
         {totalEntriesInTab > 5 && (
           <div style={{marginBottom:10}}>
             <input
@@ -1164,7 +1162,7 @@ const s = {
   cardStatVal:{fontSize:13,fontWeight:800},
   cardStatQtd:{fontSize:11,color:"#6b7280",fontWeight:600},
   cardStatDivider:{width:1,background:"#374151",flexShrink:0},
-  detailHeader:{background:"#1f2937",padding:"16px 18px",borderBottom:"1px solid #374151"},
+  detailHeader:{background:"#1f2937",padding:"16px 18px 8px",borderBottom:"1px solid #374151"},
   detailRow1:{display:"flex",alignItems:"center",marginBottom:8},
   detailRow2:{display:"flex",alignItems:"center",justifyContent:"space-between"},
   detailMini:{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:1},
