@@ -39,7 +39,7 @@ function useLongPress(onLongPress, ms = 550) {
 
 function BarChart({ desp, receita, lucro, theme }) {
   const max = Math.max(desp, receita, Math.abs(lucro), 1);
-  const maxBarHeight = 80;
+  const maxBarHeight = 100;
   const hDesp = (desp / max) * maxBarHeight;
   const hRec = (receita / max) * maxBarHeight;
   const hLuc = (Math.abs(lucro) / max) * maxBarHeight;
@@ -367,23 +367,24 @@ function App() {
   }
 
   function exportBackup() {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const fileName = `portas-backup-${today()}.json`;
-    const file = new File([blob], fileName, { type: "application/json" });
-
-    // Try native share first (works great on mobile)
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      navigator.share({ files: [file], title: "Backup Controle de Portas" }).catch(() => {});
-      return;
+    try {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const fileName = `portas-backup-${today()}.json`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 1000);
+      alert("✅ Backup exportado: " + fileName);
+    } catch (err) {
+      alert("❌ Erro ao exportar: " + err.message);
     }
-
-    // Fallback: download via anchor
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   }
 
   function importBackup(file) {
@@ -729,7 +730,7 @@ function App() {
     const isPorta = productFilter === "porta";
     const qtd = isPorta ? statsAtiva.qtdPort : statsAtiva.qtdJan;
     const receita = isPorta ? statsAtiva.port : statsAtiva.jan;
-    const desp = statsAtiva.totalQtd > 0 ? statsAtiva.desp * (qtd / statsAtiva.totalQtd) : statsAtiva.desp;
+    const desp = statsAtiva.desp; // DESPESAS PERMANECEM O TOTAL
     const lucro = receita - desp;
     const totalQtd = qtd;
     const custoUnit = totalQtd > 0 ? desp / totalQtd : 0;
