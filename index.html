@@ -1,4 +1,4 @@
-  <!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
@@ -210,6 +210,16 @@ function EspecieCard({ esp, st, onOpen, onDelete, formatBRLInt, formatBRL }) {
         {totalQtd > 0 && (
           <span style={{fontSize:13,color:"#9ca3af",background:"#111827",padding:"5px 12px",borderRadius:8,fontWeight:700}}>
             Custo/un: <span style={{color:"#e5e7eb",fontWeight:800}}>{formatBRL(st.desp / totalQtd)}</span>
+          </span>
+        )}
+        {st.desp > 0 && (
+          <span style={{fontSize:13,color:"#9ca3af",background:"#111827",padding:"5px 12px",borderRadius:8,fontWeight:700}}>
+            Retorno: <span style={{color:st.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:900}}>{st.retornoPct.toFixed(1)}%</span>
+          </span>
+        )}
+        {st.qtdPort > 0 && (
+          <span style={{fontSize:13,color:"#9ca3af",background:"#111827",padding:"5px 12px",borderRadius:8,fontWeight:700}}>
+            Lucro/porta: <span style={{color:st.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:800}}>{formatBRL(st.lucroPorPorta)}</span>
           </span>
         )}
       </div>
@@ -654,7 +664,9 @@ function App() {
     const totalQtd = qtdPort + qtdJan;
     const custoUnit = totalQtd > 0 ? desp / totalQtd : 0;
     const margemPct = receita > 0 ? (lucro / receita) * 100 : 0;
-    return { desp, port, jan, receita, lucro, qtdPort, qtdJan, totalQtd, custoUnit, margemPct };
+    const retornoPct = desp > 0 ? (lucro / desp) * 100 : 0;
+    const lucroPorPorta = qtdPort > 0 ? lucro / qtdPort : 0;
+    return { desp, port, jan, receita, lucro, qtdPort, qtdJan, totalQtd, custoUnit, margemPct, retornoPct, lucroPorPorta };
   }
 
   const totalDesp = data.entries.filter(e => e.type === "despesa").reduce((s, e) => s + e.valor, 0);
@@ -915,6 +927,16 @@ function App() {
           {statsAtiva.totalQtd > 0 && (
             <span style={{fontSize:14,color:"#9ca3af",background:"#111827",padding:"6px 14px",borderRadius:8,fontWeight:700}}>
               Custo/un: <span style={{color:"#e5e7eb",fontWeight:900,fontSize:15}}>{formatBRL(statsAtiva.custoUnit)}</span>
+            </span>
+          )}
+          {statsAtiva.desp > 0 && (
+            <span style={{fontSize:14,color:"#9ca3af",background:"#111827",padding:"6px 14px",borderRadius:8,fontWeight:700}}>
+              Retorno: <span style={{color:statsAtiva.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:900,fontSize:15}}>{statsAtiva.retornoPct.toFixed(1)}%</span>
+            </span>
+          )}
+          {statsAtiva.qtdPort > 0 && (
+            <span style={{fontSize:14,color:"#9ca3af",background:"#111827",padding:"6px 14px",borderRadius:8,fontWeight:700}}>
+              Lucro/porta: <span style={{color:statsAtiva.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:900,fontSize:15}}>{formatBRL(statsAtiva.lucroPorPorta)}</span>
             </span>
           )}
         </div>
