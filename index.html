@@ -39,7 +39,7 @@ function useLongPress(onLongPress, ms = 550) {
 
 function BarChart({ desp, receita, lucro, theme }) {
   const max = Math.max(desp, receita, Math.abs(lucro), 1);
-  const maxBarHeight = 100;
+  const maxBarHeight = 80;
   const hDesp = (desp / max) * maxBarHeight;
   const hRec = (receita / max) * maxBarHeight;
   const hLuc = (Math.abs(lucro) / max) * maxBarHeight;
@@ -326,6 +326,7 @@ function App() {
   const [renamingEspecie, setRenamingEspecie] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [formDirty, setFormDirty] = useState(false);
+  const [productFilter, setProductFilter] = useState(null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -367,10 +368,20 @@ function App() {
 
   function exportBackup() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const fileName = `portas-backup-${today()}.json`;
+    const file = new File([blob], fileName, { type: "application/json" });
+
+    // Try native share first (works great on mobile)
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file], title: "Backup Controle de Portas" }).catch(() => {});
+      return;
+    }
+
+    // Fallback: download via anchor
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `portas-backup-${today()}.json`;
+    a.download = fileName;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
@@ -713,6 +724,27 @@ function App() {
 
   const statsAtiva = especieAtiva ? stats(especieAtiva) : null;
 
+  const displayStats = useMemo(() => {
+    if (!statsAtiva || !productFilter) return statsAtiva;
+    const isPorta = productFilter === "porta";
+    const qtd = isPorta ? statsAtiva.qtdPort : statsAtiva.qtdJan;
+    const receita = isPorta ? statsAtiva.port : statsAtiva.jan;
+    const desp = statsAtiva.totalQtd > 0 ? statsAtiva.desp * (qtd / statsAtiva.totalQtd) : statsAtiva.desp;
+    const lucro = receita - desp;
+    const totalQtd = qtd;
+    const custoUnit = totalQtd > 0 ? desp / totalQtd : 0;
+    const margemPct = receita > 0 ? (lucro / receita) * 100 : 0;
+    const retornoPct = desp > 0 ? (lucro / desp) * 100 : 0;
+    const lucroPorPorta = isPorta && qtd > 0 ? lucro / qtd : statsAtiva.lucroPorPorta;
+    const lucroPorJanela = !isPorta && qtd > 0 ? lucro / qtd : 0;
+    return {
+      ...statsAtiva,
+      desp, port: isPorta ? receita : 0, jan: !isPorta ? receita : 0,
+      receita, lucro, qtdPort: isPorta ? qtd : 0, qtdJan: !isPorta ? qtd : 0,
+      totalQtd, custoUnit, margemPct, retornoPct, lucroPorPorta, lucroPorJanela
+    };
+  }, [statsAtiva, productFilter]);
+
   if (loading) return <div style={s.loadWrap}><div style={s.spinner} /></div>;
 
   // FORM
@@ -905,57 +937,61 @@ function App() {
       {saved && <div style={s.toast}>✅ Lançamento salvo!</div>}
       <div style={s.detailHeader}>
         <div style={s.detailRow1}>
-          <div style={s.detailMini}>
+          <div style={{...s.detailMini, cursor:"pointer", opacity: productFilter && productFilter!=="porta" ? 0.4 : 1, transition:"opacity 0.2s"}}
+            onClick={()=>{setProductFilter(productFilter==="porta"?null:"porta");setSubTab(productFilter==="porta"?"despesas":"portas");}}>
             <span style={s.detailMiniLabel}>🚪 portas</span>
-            <span style={{...s.detailMiniVal, color:"#22c55e"}}>{statsAtiva.qtdPort>0?`${statsAtiva.qtdPort} un`:"—"}</span>
+            <span style={{...s.detailMiniVal, color:"#22c55e"}}>{displayStats.qtdPort>0?`${displayStats.qtdPort} un`:"—"}</span>
+            {productFilter==="porta" && <span style={{fontSize:9,color:"#22c55e",marginTop:2}}>● ativo</span>}
           </div>
           <div style={s.detailMiniDiv}/>
-          <div style={s.detailMini}>
+          <div style={{...s.detailMini, cursor:"pointer", opacity: productFilter && productFilter!=="janela" ? 0.4 : 1, transition:"opacity 0.2s"}}
+            onClick={()=>{setProductFilter(productFilter==="janela"?null:"janela");setSubTab(productFilter==="janela"?"despesas":"janelas");}}>
             <span style={s.detailMiniLabel}>🪟 janelas</span>
-            <span style={{...s.detailMiniVal, color:"#60b4f7"}}>{statsAtiva.qtdJan>0?`${statsAtiva.qtdJan} un`:"—"}</span>
+            <span style={{...s.detailMiniVal, color:"#60b4f7"}}>{displayStats.qtdJan>0?`${displayStats.qtdJan} un`:"—"}</span>
+            {productFilter==="janela" && <span style={{fontSize:9,color:"#60b4f7",marginTop:2}}>● ativo</span>}
           </div>
           <div style={s.detailMiniDiv}/>
           <div style={{...s.detailMini, flex:2}}>
-            <span style={s.detailMiniLabel}>{statsAtiva.lucro>=0?"LUCRO":"PREJUÍZO"}</span>
-            <span style={{...s.detailLucroVal, color:statsAtiva.lucro>=0?"#22c55e":"#ff6b6b"}}>{formatBRLInt(Math.abs(statsAtiva.lucro))}</span>
+            <span style={s.detailMiniLabel}>{displayStats.lucro>=0?"LUCRO":"PREJUÍZO"}</span>
+            <span style={{...s.detailLucroVal, color:displayStats.lucro>=0?"#22c55e":"#ff6b6b"}}>{formatBRLInt(Math.abs(displayStats.lucro))}</span>
           </div>
         </div>
         <div style={{display:"flex",gap:10,justifyContent:"center",marginBottom:4,flexWrap:"wrap"}}>
           <span style={{fontSize:14,color:"#9ca3af",background:"#111827",padding:"6px 14px",borderRadius:8,fontWeight:700}}>
-            Margem: <span style={{color:statsAtiva.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:900,fontSize:15}}>{statsAtiva.margemPct.toFixed(1)}%</span>
+            Margem: <span style={{color:displayStats.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:900,fontSize:15}}>{displayStats.margemPct.toFixed(1)}%</span>
           </span>
-          {statsAtiva.totalQtd > 0 && (
+          {displayStats.totalQtd > 0 && (
             <span style={{fontSize:14,color:"#9ca3af",background:"#111827",padding:"6px 14px",borderRadius:8,fontWeight:700}}>
-              Custo/un: <span style={{color:"#e5e7eb",fontWeight:900,fontSize:15}}>{formatBRL(statsAtiva.custoUnit)}</span>
+              Custo/un: <span style={{color:"#e5e7eb",fontWeight:900,fontSize:15}}>{formatBRL(displayStats.custoUnit)}</span>
             </span>
           )}
-          {statsAtiva.desp > 0 && (
+          {displayStats.desp > 0 && (
             <span style={{fontSize:14,color:"#9ca3af",background:"#111827",padding:"6px 14px",borderRadius:8,fontWeight:700}}>
-              Retorno: <span style={{color:statsAtiva.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:900,fontSize:15}}>{statsAtiva.retornoPct.toFixed(1)}%</span>
+              Retorno: <span style={{color:displayStats.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:900,fontSize:15}}>{displayStats.retornoPct.toFixed(1)}%</span>
             </span>
           )}
-          {statsAtiva.qtdPort > 0 && (
+          {displayStats.qtdPort > 0 && (
             <span style={{fontSize:14,color:"#9ca3af",background:"#111827",padding:"6px 14px",borderRadius:8,fontWeight:700}}>
-              Lucro/porta: <span style={{color:statsAtiva.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:900,fontSize:15}}>{formatBRL(statsAtiva.lucroPorPorta)}</span>
+              Lucro/porta: <span style={{color:displayStats.lucro>=0?"#22c55e":"#ff6b6b",fontWeight:900,fontSize:15}}>{formatBRL(displayStats.lucroPorPorta)}</span>
             </span>
           )}
         </div>
-        <BarChart desp={statsAtiva.desp} receita={statsAtiva.receita} lucro={statsAtiva.lucro} theme={theme} />
+        <BarChart desp={displayStats.desp} receita={displayStats.receita} lucro={displayStats.lucro} theme={theme} />
         <div style={s.detailRow2}>
           <button style={{...s.detailTabBtn, ...(subTab==="despesas"?{borderBottom:"2px solid #fb923c"}:{})}}
             onClick={()=>{setSubTab("despesas");setFilterDoorName(null);setFilterType(null);setSearchText("");}}>
             <span style={s.detailValLabel}>Despesas</span>
-            <span style={{...s.detailValNum, color:"#ff6b6b"}}>{(subTab==="despesas"&&filterType)?formatBRLInt(filteredTotal):formatBRLInt(statsAtiva.desp)}</span>
+            <span style={{...s.detailValNum, color:"#ff6b6b"}}>{(subTab==="despesas"&&filterType)?formatBRLInt(filteredTotal):formatBRLInt(displayStats.desp)}</span>
           </button>
           <button style={{...s.detailTabBtn, ...(subTab==="portas"?{borderBottom:"2px solid #4ade80"}:{})}}
             onClick={()=>{setSubTab("portas");setFilterDoorName(null);setFilterType(null);setSearchText("");}}>
             <span style={s.detailValLabel}>Portas</span>
-            <span style={{...s.detailValNum, color:"#22c55e"}}>{(subTab==="portas"&&filterDoorName)?formatBRLInt(filteredTotal):formatBRLInt(statsAtiva.port)}</span>
+            <span style={{...s.detailValNum, color:"#22c55e"}}>{(subTab==="portas"&&filterDoorName)?formatBRLInt(filteredTotal):formatBRLInt(displayStats.port)}</span>
           </button>
           <button style={{...s.detailTabBtn, ...(subTab==="janelas"?{borderBottom:"2px solid #60b4f7"}:{})}}
             onClick={()=>{setSubTab("janelas");setFilterDoorName(null);setFilterType(null);setSearchText("");}}>
             <span style={s.detailValLabel}>Janelas</span>
-            <span style={{...s.detailValNum, color:"#60b4f7"}}>{(subTab==="janelas"&&filterDoorName)?formatBRLInt(filteredTotal):formatBRLInt(statsAtiva.jan)}</span>
+            <span style={{...s.detailValNum, color:"#60b4f7"}}>{(subTab==="janelas"&&filterDoorName)?formatBRLInt(filteredTotal):formatBRLInt(displayStats.jan)}</span>
           </button>
         </div>
       </div>
