@@ -432,6 +432,10 @@ function App() {
     try {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const fileName = `portas-backup-${today()}.json`;
+      if (isApp()) {
+        compartilharNoApp(blob, fileName, "Backup Controle de Portas").catch(e => { if (!/cancel/i.test(String(e && e.message))) alert("Erro ao exportar backup"); });
+        return;
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -1425,8 +1429,33 @@ const s = {
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 
+// Dentro do APK (Capacitor): grava o arquivo no cache e abre o compartilhar do Android
+function isApp() {
+  const C = window.Capacitor;
+  return !!(C && typeof C.isNativePlatform === "function" && C.isNativePlatform() && C.Plugins && C.Plugins.Share && C.Plugins.Filesystem);
+}
+function blobToBase64(blob) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result).split(",")[1]);
+    r.onerror = rej;
+    r.readAsDataURL(blob);
+  });
+}
+async function compartilharNoApp(blob, fileName, title) {
+  const { Filesystem, Share } = window.Capacitor.Plugins;
+  const data = await blobToBase64(blob);
+  await Filesystem.writeFile({ path: fileName, data, directory: "CACHE" });
+  const { uri } = await Filesystem.getUri({ path: fileName, directory: "CACHE" });
+  await Share.share({ title, files: [uri] });
+}
+
 function compartilharPDFPortas(doc, fileName) {
   const blob = doc.output('blob');
+  if (isApp()) {
+    compartilharNoApp(blob, fileName, 'Controle de Portas').catch(e => { if (!/cancel/i.test(String(e && e.message))) alert("Erro ao compartilhar o PDF"); });
+    return;
+  }
   const file = new File([blob], fileName, {type:'application/pdf'});
   if (navigator.canShare && navigator.canShare({files:[file]})) {
     navigator.share({files:[file], title:'Controle de Portas'}).catch(()=>{});
