@@ -1,0 +1,70 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Montar assets web (www)
+        run: |
+          rm -rf www && mkdir -p www
+          cp index.html manifest.json sw.js logo192.png logo512.png www/
+
+      - name: Preparar icone 1024 (a partir do logo512)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq imagemagick
+          mkdir -p assets
+          convert logo512.png -resize 1024x1024 assets/icon.png
+
+      - name: Instalar Capacitor
+        run: npm install
+
+      - name: Adicionar plataforma Android
+        run: npx cap add android
+
+      - name: Sincronizar
+        run: npx cap sync android
+
+      - name: Gerar icones do app
+        run: npx --yes @capacitor/assets@3 generate --android --iconBackgroundColor '#111827' --iconBackgroundColorDark '#111827'
+
+      - name: Compilar APK (debug)
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Renomear APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk controle-de-portas.apk
+
+      - name: Enviar como artefato do build
+        uses: actions/upload-artifact@v4
+        with:
+          name: controle-de-portas-apk
+          path: controle-de-portas.apk
+
+      - name: Publicar em Releases (baixar direto no celular)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-v${{ github.run_number }}
+          name: Controle de Portas APK (build ${{ github.run_number }})
+          files: controle-de-portas.apk

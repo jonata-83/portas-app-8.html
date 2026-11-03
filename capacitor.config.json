@@ -1,0 +1,12 @@
+{
+  "appId": "br.com.jl.portas",
+  "appName": "Controle de Portas",
+  "webDir": "www",
+  "server": {
+    "url": "https://jonata-83.github.io/portas-app-8.html/",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}
