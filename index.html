@@ -1,3 +1,4 @@
+
  <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -27,6 +28,8 @@
 <script type="text/babel">
 const { useState, useEffect, useRef, useMemo } = React;
 const STORAGE_KEY = "portas-app-v15";
+const TRASH_KEY = "portas-app-lixeira";
+const TRASH_DIAS = 30;
 
 function useLongPress(onLongPress, ms = 550) {
   const timerRef = useRef(null);
@@ -129,7 +132,7 @@ function EntryCard({ e, deleteConfirm, setDeleteConfirm, handleDelete, handleEdi
           {e.desc && <div style={s.entryDesc}>{e.desc}</div>}
           {e.type==="despesa" && e.volM3 > 0 && (
             <div style={{fontSize:12,color:"#60b4f7",marginTop:3,fontWeight:600}}>
-              📐 {e.volM3.toFixed(3)} m³ {e.vrM3 > 0 && `× ${formatBRL(e.vrM3)}/m³`}
+              📐 {formatM3(e.volM3)} m³ {e.vrM3 > 0 && `× ${formatBRL(e.vrM3)}/m³`}
             </div>
           )}
           <div style={s.entryDate}>{formatDate(e.date)}</div>
@@ -289,6 +292,31 @@ function formatShort(val) {
   if (Math.abs(v) >= 1000) return `R$ ${(v / 1000).toLocaleString("pt-BR", { minimumFractionDigits: v % 1000 === 0 ? 0 : 1, maximumFractionDigits: 1 })} mil`;
   return formatBRL(v);
 }
+// m³ no padrão do romaneio: número inteiro sem vírgula/ponto com 4+ dígitos = milésimos (7119 → 7,119)
+function parseM3(v) {
+  const str = String(v ?? "").trim();
+  if (!str) return 0;
+  const n = parseFloat(str.replace(",", ".")) || 0;
+  if (/^\d+$/.test(str) && n >= 1000) return n / 1000;
+  return n;
+}
+function parseNum(v) {
+  let str = String(v ?? "").trim();
+  if (str.includes(",")) str = str.replace(/\./g, "").replace(",", ".");
+  return parseFloat(str) || 0;
+}
+function formatM3(v) {
+  return (v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+}
+function fixEntries(entries) {
+  return (entries || []).map(e => {
+    if (e && e.type === "despesa" && e.volM3 >= 1000 && Number.isInteger(e.volM3)) {
+      const volM3 = e.volM3 / 1000;
+      return { ...e, volM3, valor: e.vrM3 ? Math.round(volM3 * e.vrM3 * 100) / 100 : e.valor };
+    }
+    return e;
+  });
+}
 function today() { return new Date().toISOString().slice(0, 10); }
 function formatDate(d) {
   if (!d) return "";
@@ -328,11 +356,18 @@ function App() {
   const [formDirty, setFormDirty] = useState(false);
   const [productFilter, setProductFilter] = useState(null);
   const fileInputRef = useRef(null);
+  const [lixeira, setLixeira] = useState([]);
+  const [trashFrom, setTrashFrom] = useState("list");
 
   useEffect(() => {
     try {
       const r = storage.get(STORAGE_KEY);
-      if (r?.value) setData(JSON.parse(r.value));
+      if (r?.value) { const d = JSON.parse(r.value); const fixed = { ...d, entries: fixEntries(d.entries) }; setData(fixed); if (JSON.stringify(fixed) !== r.value) { try { storage.set(STORAGE_KEY, JSON.stringify(fixed)); } catch {} } }
+      const lx = storage.get(TRASH_KEY);
+      if (lx?.value) {
+        const limite = Date.now() - TRASH_DIAS * 86400000;
+        setLixeira(JSON.parse(lx.value).filter(i => i.deletedAt >= limite));
+      }
       const t = storage.get(THEME_KEY);
       if (t?.value) { const found = THEMES.find(th=>th.id===t.value); if(found) setTheme(found); }
     } catch {}
@@ -360,6 +395,33 @@ function App() {
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [formDirty]);
+
+  function saveTrash(list) {
+    setLixeira(list);
+    try { storage.set(TRASH_KEY, JSON.stringify(list)); } catch {}
+  }
+  function moveToTrash(items) {
+    if (!items.length) return;
+    const agora = Date.now();
+    saveTrash([...items.map(e => ({ ...e, deletedAt: agora })), ...lixeira]);
+  }
+  function restoreFromTrash(item) {
+    const { deletedAt, ...entry } = item;
+    const jaExiste = data.entries.some(e => e.id === entry.id);
+    const restored = jaExiste ? { ...entry, id: Date.now() } : entry;
+    persist({ ...data, entries: [restored, ...data.entries] });
+    saveTrash(lixeira.filter(i => !(i.id === item.id && i.deletedAt === item.deletedAt)));
+  }
+  function deleteForever(item) {
+    if (!confirm("Apagar de vez? Não dá para recuperar depois.")) return;
+    saveTrash(lixeira.filter(i => !(i.id === item.id && i.deletedAt === item.deletedAt)));
+  }
+  function emptyTrash() {
+    if (!lixeira.length) return;
+    if (!confirm(`Esvaziar a lixeira (${lixeira.length} itens)? Não dá para recuperar depois.`)) return;
+    saveTrash([]);
+  }
+  function openTrash() { setTrashFrom(view); setView("lixeira"); }
 
   function persist(newData) {
     setData(newData);
@@ -411,13 +473,15 @@ function App() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
     const now = new Date().toLocaleDateString("pt-BR");
-    doc.setFillColor(30, 58, 138);
-    doc.rect(0, 0, 595, 60, "F");
-    doc.setTextColor(255,255,255);
+    doc.setTextColor(20, 20, 20);
     doc.setFontSize(20); doc.setFont("helvetica","bold");
     doc.text("Controle de Portas e Janelas", 40, 38);
-    doc.setFontSize(10); doc.setFont("helvetica","normal");
+    doc.setFontSize(9); doc.setFont("helvetica","normal");
+    doc.setTextColor(100, 100, 100);
     doc.text(`Emitido em ${now}`, 595-40, 38, { align:"right" });
+    doc.setDrawColor(180, 180, 180);
+    doc.setLineWidth(0.5);
+    doc.line(40, 48, 555, 48);
     const allEspecies = [...new Set(data.entries.map(e => e.especie))].sort();
     const rows = allEspecies.map(esp => {
       const st = stats(esp);
@@ -541,7 +605,7 @@ function App() {
         lineWidth:0.5,
         lineColor:[200,200,200]
       },
-      alternateRowStyles:{ fillColor:[245,248,255] },
+      alternateRowStyles:{ fillColor:[255,255,255] },
       columnStyles:{
         0: { halign:"center", cellWidth:42 },
         3: { halign:"right",  cellWidth:55 },
@@ -574,15 +638,15 @@ function App() {
   }
 
   function handleAdd() {
-    const valor = parseFloat(String(form.valor).replace(",", "."));
+    const valor = parseNum(form.valor);
     if (!valor || isNaN(valor) || (!especieAtiva && !form.especie.trim())) return;
     const especie = (especieAtiva || form.especie.trim()).toUpperCase();
 
     let volM3 = 0;
     let vrM3Val = 0;
     if (form.type === "despesa" && (form.expType === "tora" || form.expType === "madeira" || form.expType === "serragem")) {
-      volM3 = parseFloat(String(form.m3||"").replace(",",".")) || 0;
-      vrM3Val = parseFloat(String(form.vrM3||"").replace(",",".")) || 0;
+      volM3 = parseM3(form.m3);
+      vrM3Val = parseNum(form.vrM3);
     }
 
     if (editingId) {
@@ -622,7 +686,8 @@ function App() {
 
   function handleDelete(id) {
     const remaining = data.entries.filter(e => e.especie === especieAtiva).length;
-    const newData = { entries: data.entries.filter(e => e.id !== id) };
+    moveToTrash(data.entries.filter(e => e.id === id));
+    const newData = { ...data, entries: data.entries.filter(e => e.id !== id) };
     persist(newData);
     setDeleteConfirm(null);
     if (remaining <= 1) setView("list");
@@ -749,6 +814,57 @@ function App() {
   if (loading) return <div style={s.loadWrap}><div style={s.spinner} /></div>;
 
   // FORM
+  if (view === "lixeira") {
+    const tipoLabel = (e) => e.type === "porta" ? "🚪 Porta" : e.type === "janela" ? "🪟 Janela" : (EXPENSE_TYPES.find(t=>t.id===e.expType)?.label || "Despesa");
+    const fmtHora = (ms) => { const d = new Date(ms); return d.toLocaleDateString("pt-BR") + " " + d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); };
+    const voltar = () => setView(trashFrom === "detail" && especieAtiva && data.entries.some(e=>e.especie===especieAtiva) ? "detail" : "list");
+    return (
+      <div style={s.root}>
+        <div style={{...s.header, background:`linear-gradient(135deg, ${theme.a} 0%, ${theme.b} 60%, ${theme.a}cc 100%)`}}>
+          <button style={s.backBtn} onClick={voltar}>‹</button>
+          <span style={s.headerTitle}>🗑️ Lixeira</span>
+        </div>
+        <div style={{padding:"14px 16px"}}>
+          <div style={{color:"#9ca3af",fontSize:13,marginBottom:12}}>
+            Itens apagados ficam aqui por {TRASH_DIAS} dias. Toque em <strong style={{color:"#4ade80"}}>Restaurar</strong> para voltar o lançamento.
+          </div>
+          {lixeira.length === 0 ? (
+            <div style={{textAlign:"center",color:"#6b7280",padding:"60px 0",fontSize:15}}>A lixeira está vazia</div>
+          ) : (
+            <>
+              {lixeira.map(item => (
+                <div key={item.id + "-" + item.deletedAt} style={s.trashCard}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start"}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{color:"#fff",fontWeight:700,fontSize:15}}>{item.especie}</div>
+                      <div style={{color:"#d1d5db",fontSize:14,marginTop:2}}>
+                        {tipoLabel(item)}{item.nome ? ` · ${item.nome}` : ""}{item.fornecedor ? ` — ${item.fornecedor}` : ""}
+                      </div>
+                      {item.volM3 > 0 && (
+                        <div style={{color:"#60b4f7",fontSize:13,marginTop:2}}>📐 {formatM3(item.volM3)} m³{item.vrM3 > 0 ? ` × ${formatBRL(item.vrM3)}/m³` : ""}</div>
+                      )}
+                      {item.qtd > 0 && <div style={{color:"#9ca3af",fontSize:13,marginTop:2}}>{item.qtd} un</div>}
+                      {item.desc ? <div style={{color:"#9ca3af",fontSize:13,marginTop:2}}>{item.desc}</div> : null}
+                      <div style={{color:"#6b7280",fontSize:12,marginTop:4}}>Lançado {formatDate(item.date)} · apagado {fmtHora(item.deletedAt)}</div>
+                    </div>
+                    <div style={{color:item.type==="despesa"?"#ff6b6b":"#22c55e",fontWeight:800,fontSize:15,whiteSpace:"nowrap"}}>
+                      {item.type==="despesa"?"- ":"+ "}{formatBRL(item.valor)}
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:8,marginTop:10}}>
+                    <button style={s.trashRestore} onClick={()=>restoreFromTrash(item)}>↩️ Restaurar</button>
+                    <button style={s.trashDelete} onClick={()=>deleteForever(item)}>Apagar de vez</button>
+                  </div>
+                </div>
+              ))}
+              <button style={s.trashEmpty} onClick={emptyTrash}>Esvaziar lixeira</button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (view === "form") return (
     <div style={s.root}>
       <div style={{...s.header, background:`linear-gradient(135deg, ${theme.a} 0%, ${theme.b} 60%, ${theme.a}cc 100%)`}}>
@@ -797,12 +913,12 @@ function App() {
                     <span style={s.m3Label}>Quantidade (m³)</span>
                     <input
                       style={s.m3Input}
-                      type="number" inputMode="decimal"
-                      placeholder="Ex: 10"
+                      type="text" inputMode="decimal"
+                      placeholder="Ex: 7119 ou 7,119"
                       value={form.m3||""}
                       onChange={e => {
                         const m3 = e.target.value;
-                        const m3Num = parseFloat(String(m3).replace(",",".")) || 0;
+                        const m3Num = parseM3(m3);
                         const vrNum = parseFloat(String(form.vrM3||"").replace(",",".")) || 0;
                         const total = (m3Num && vrNum) ? String((m3Num * vrNum).toFixed(2)) : form.valor;
                         setForm(f=>({...f, m3, valor: total}));
@@ -821,7 +937,7 @@ function App() {
                       onChange={e => {
                         const vr = e.target.value;
                         const vrNum = parseFloat(String(vr).replace(",",".")) || 0;
-                        const m3Num = parseFloat(String(form.m3||"").replace(",",".")) || 0;
+                        const m3Num = parseM3(form.m3);
                         const total = (vrNum && m3Num) ? String((m3Num * vrNum).toFixed(2)) : form.valor;
                         setForm(f=>({...f, vrM3: vr, valor: total}));
                         setFormDirty(true);
@@ -831,7 +947,7 @@ function App() {
                 </div>
                 {(form.m3 && form.vrM3) && (
                   <div style={s.m3Result}>
-                    {parseFloat(String(form.m3).replace(",",".")).toLocaleString("pt-BR")} m³ × {formatBRL(parseFloat(String(form.vrM3).replace(",",".")))} = <strong style={{color:"#4ade80"}}>{formatBRL(parseFloat(String(form.m3).replace(",","."))*parseFloat(String(form.vrM3).replace(",",".")))}</strong>
+                    {formatM3(parseM3(form.m3))} m³ × {formatBRL(parseNum(form.vrM3))} = <strong style={{color:"#4ade80"}}>{formatBRL(parseM3(form.m3)*parseNum(form.vrM3))}</strong>
                   </div>
                 )}
               </div>
@@ -1047,6 +1163,7 @@ function App() {
       </div>
       <div style={s.fabAreaRight}>
         <div style={s.fabMiniRow}>
+          <button style={s.fabMiniBtn} onClick={openTrash} title="Lixeira">🗑️{lixeira.length>0 && <span style={s.trashBadge}>{lixeira.length}</span>}</button>
           <button style={s.fabMiniBtn} onClick={exportPDFEspecie} title="Exportar PDF">📄</button>
           <button style={s.fabMiniBtn} onClick={()=>setShowThemePicker(p=>!p)} title="Cor">🎨</button>
         </div>
@@ -1123,7 +1240,7 @@ function App() {
               <EspecieCard
                 key={esp} esp={esp} st={st}
                 onOpen={()=>{setEspecieAtiva(esp);setSubTab("despesas");setView("detail");}}
-                onDelete={()=>{ persist({entries:data.entries.filter(e=>e.especie!==esp)}); }}
+                onDelete={()=>{ moveToTrash(data.entries.filter(e=>e.especie===esp)); persist({...data, entries:data.entries.filter(e=>e.especie!==esp)}); }}
                 formatBRLInt={formatBRLInt} formatBRL={formatBRL}
               />
             );
@@ -1184,6 +1301,7 @@ function App() {
 
       <div style={s.fabAreaRight}>
         <div style={s.fabMiniRow}>
+          <button style={s.fabMiniBtn} onClick={openTrash} title="Lixeira">🗑️{lixeira.length>0 && <span style={s.trashBadge}>{lixeira.length}</span>}</button>
           <button style={s.fabMiniBtn} onClick={exportPDF} title="Exportar PDF">📄</button>
           <button style={s.fabMiniBtn} onClick={()=>setShowThemePicker(p=>!p)} title="Cor">🎨</button>
         </div>
@@ -1263,8 +1381,13 @@ const s = {
   themeSwatchLabel:{color:"#9ca3af",fontSize:10,fontWeight:600},
   fabSmall:{background:"#4f46e5",color:"#fff",border:"none",width:58,height:58,borderRadius:"50%",fontSize:30,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",boxShadow:"0 4px 20px rgba(79,70,229,0.6)",fontWeight:300},
   fabAreaRight:{position:"fixed",bottom:20,right:16,display:"flex",flexDirection:"column",alignItems:"center",gap:8,zIndex:30},
+  trashBadge:{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",borderRadius:9,minWidth:18,height:18,fontSize:10,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 4px"},
+  trashCard:{background:"#1f2937",border:"1px solid #374151",borderRadius:14,padding:"12px 14px",marginBottom:10},
+  trashRestore:{flex:1,padding:"10px",borderRadius:10,border:"1px solid #14532d",background:"#0a1f0a",color:"#4ade80",fontWeight:700,fontSize:14,cursor:"pointer"},
+  trashDelete:{flex:1,padding:"10px",borderRadius:10,border:"1px solid #7f1d1d",background:"#2a1010",color:"#fca5a5",fontWeight:700,fontSize:14,cursor:"pointer"},
+  trashEmpty:{width:"100%",marginTop:8,padding:"12px",borderRadius:12,border:"1px solid #4b5563",background:"transparent",color:"#9ca3af",fontWeight:700,fontSize:14,cursor:"pointer"},
   fabMiniRow:{display:"flex",flexDirection:"column",gap:6},
-  fabMiniBtn:{background:"rgba(31,41,55,0.95)",border:"1px solid #4b5563",borderRadius:"50%",width:36,height:36,fontSize:15,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 8px rgba(0,0,0,0.4)"},
+  fabMiniBtn:{position:"relative",background:"rgba(31,41,55,0.95)",border:"1px solid #4b5563",borderRadius:"50%",width:36,height:36,fontSize:15,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 8px rgba(0,0,0,0.4)"},
   delRow:{display:"flex",gap:5},
   btnDelOk:{background:"#7f1d1d",color:"#fca5a5",border:"none",borderRadius:6,padding:"3px 8px",fontSize:12,cursor:"pointer",fontWeight:700},
   btnDelNo:{background:"#374151",color:"#d1d5db",border:"none",borderRadius:6,padding:"3px 8px",fontSize:12,cursor:"pointer"},
