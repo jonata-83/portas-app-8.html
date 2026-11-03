@@ -28,6 +28,8 @@
 const { useState, useEffect, useRef, useMemo } = React;
 const STORAGE_KEY = "portas-app-v15";
 const TRASH_KEY = "portas-app-lixeira";
+const BACKUP_KEY = "portas-app-ultimo-backup";
+const BACKUP_DIAS = 7;
 const TRASH_DIAS = 30;
 
 function useLongPress(onLongPress, ms = 550) {
@@ -316,6 +318,33 @@ function fixEntries(entries) {
     return e;
   });
 }
+const MESES = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
+function mesLabel(ym) {
+  if (!ym) return "";
+  const [y, m] = ym.split("-");
+  return `${MESES[parseInt(m,10)-1]}/${y}`;
+}
+function mesAtual(delta) {
+  const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + (delta||0));
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+}
+function noPeriodo(e, p) {
+  if (!p || p.tipo === "tudo") return true;
+  const d = e.date || "";
+  if (p.tipo === "mes") return d.slice(0,7) === p.mes;
+  if (p.tipo === "intervalo") return (!p.de || d >= p.de) && (!p.ate || d <= p.ate);
+  return true;
+}
+function periodoLabel(p) {
+  if (!p || p.tipo === "tudo") return "Tudo";
+  if (p.tipo === "mes") return mesLabel(p.mes);
+  if (p.tipo === "intervalo") {
+    if (p.de && p.ate) return `${formatDate(p.de)} a ${formatDate(p.ate)}`;
+    if (p.de) return `desde ${formatDate(p.de)}`;
+    if (p.ate) return `até ${formatDate(p.ate)}`;
+  }
+  return "Tudo";
+}
 function today() { return new Date().toISOString().slice(0, 10); }
 function formatDate(d) {
   if (!d) return "";
@@ -357,11 +386,17 @@ function App() {
   const fileInputRef = useRef(null);
   const [lixeira, setLixeira] = useState([]);
   const [trashFrom, setTrashFrom] = useState("list");
+  const [periodo, setPeriodo] = useState({ tipo: "tudo", mes: mesAtual(0), de: "", ate: "" });
+  const [showPeriodo, setShowPeriodo] = useState(false);
+  const [lastBackup, setLastBackup] = useState(0);
+  const [showShareMenu, setShowShareMenu] = useState(false);
 
   useEffect(() => {
     try {
       const r = storage.get(STORAGE_KEY);
       if (r?.value) { const d = JSON.parse(r.value); const fixed = { ...d, entries: fixEntries(d.entries) }; setData(fixed); if (JSON.stringify(fixed) !== r.value) { try { storage.set(STORAGE_KEY, JSON.stringify(fixed)); } catch {} } }
+      const lb = storage.get(BACKUP_KEY);
+      if (lb?.value) setLastBackup(parseInt(lb.value, 10) || 0);
       const lx = storage.get(TRASH_KEY);
       if (lx?.value) {
         const limite = Date.now() - TRASH_DIAS * 86400000;
@@ -427,28 +462,20 @@ function App() {
     try { storage.set(STORAGE_KEY, JSON.stringify(newData)); } catch {}
   }
 
-  function exportBackup() {
+  function marcarBackup() {
+    const agora = Date.now();
+    setLastBackup(agora);
+    try { storage.set(BACKUP_KEY, String(agora)); } catch {}
+  }
+
+  async function exportBackup() {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const fileName = `portas-backup-${today()}.json`;
     try {
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-      const fileName = `portas-backup-${today()}.json`;
-      if (isApp()) {
-        compartilharNoApp(blob, fileName, "Backup Controle de Portas").catch(e => { if (!/cancel/i.test(String(e && e.message))) alert("Erro ao exportar backup"); });
-        return;
-      }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      a.style.display = "none";
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 1000);
-      alert("✅ Backup exportado: " + fileName);
-    } catch (err) {
-      alert("❌ Erro ao exportar: " + err.message);
+      const ok = await compartilharArquivo(blob, fileName, "Backup Controle de Portas");
+      if (ok) marcarBackup();
+    } catch (e) {
+      if (!/cancel/i.test(String(e && e.message))) alert("Erro ao exportar backup");
     }
   }
 
@@ -481,11 +508,11 @@ function App() {
     doc.text("Controle de Portas e Janelas", 40, 38);
     doc.setFontSize(9); doc.setFont("helvetica","normal");
     doc.setTextColor(100, 100, 100);
-    doc.text(`Emitido em ${now}`, 595-40, 38, { align:"right" });
+    doc.text(`Emitido em ${now}${periodoAtivo ? "  ·  Período: " + periodoLabel(periodo) : ""}`, 595-40, 38, { align:"right" });
     doc.setDrawColor(180, 180, 180);
     doc.setLineWidth(0.5);
     doc.line(40, 48, 555, 48);
-    const allEspecies = [...new Set(data.entries.map(e => e.especie))].sort();
+    const allEspecies = [...new Set(E.map(e => e.especie))].sort();
     const rows = allEspecies.map(esp => {
       const st = stats(esp);
       const margem = st.receita > 0 ? ((st.lucro / st.receita) * 100).toFixed(1) + "%" : "0%";
@@ -543,7 +570,7 @@ function App() {
     doc.text(especieAtiva || "", 40, 36);
     doc.setFontSize(9); doc.setFont("helvetica","normal");
     doc.setTextColor(100, 100, 100);
-    doc.text(`Emitido em ${now}`, 595-40, 36, { align:"right" });
+    doc.text(`Emitido em ${now}${periodoAtivo ? "  ·  Período: " + periodoLabel(periodo) : ""}`, 595-40, 36, { align:"right" });
 
     doc.setDrawColor(180, 180, 180);
     doc.setLineWidth(0.5);
@@ -558,7 +585,7 @@ function App() {
     if (st.lucro >= 0) { doc.setTextColor(21, 128, 61); } else { doc.setTextColor(185, 28, 28); }
     doc.text(lucroText, 40, 72);
 
-    const allEntries = data.entries
+    const allEntries = E
       .filter(e => e.especie === especieAtiva)
       .sort((a, b) => a.date.localeCompare(b.date));
 
@@ -727,18 +754,21 @@ function App() {
     setView("form");
   }
 
-  const especies = [...new Set(data.entries.map(e => e.especie))].sort((a, b) => {
-    const latestA = data.entries.filter(e => e.especie === a).map(e => e.date).sort().reverse()[0] || "";
-    const latestB = data.entries.filter(e => e.especie === b).map(e => e.date).sort().reverse()[0] || "";
+  const E = useMemo(() => data.entries.filter(e => noPeriodo(e, periodo)), [data.entries, periodo]);
+  const periodoAtivo = periodo.tipo !== "tudo";
+
+  const especies = [...new Set(E.map(e => e.especie))].sort((a, b) => {
+    const latestA = E.filter(e => e.especie === a).map(e => e.date).sort().reverse()[0] || "";
+    const latestB = E.filter(e => e.especie === b).map(e => e.date).sort().reverse()[0] || "";
     return latestB.localeCompare(latestA);
   });
 
   function stats(esp) {
-    const desp = data.entries.filter(e => e.especie === esp && e.type === "despesa").reduce((s, e) => s + e.valor, 0);
-    const port = data.entries.filter(e => e.especie === esp && e.type === "porta").reduce((s, e) => s + e.valor, 0);
-    const jan = data.entries.filter(e => e.especie === esp && e.type === "janela").reduce((s, e) => s + e.valor, 0);
-    const qtdPort = data.entries.filter(e => e.especie === esp && e.type === "porta").reduce((s, e) => s + (e.qtd || 0), 0);
-    const qtdJan = data.entries.filter(e => e.especie === esp && e.type === "janela").reduce((s, e) => s + (e.qtd || 0), 0);
+    const desp = E.filter(e => e.especie === esp && e.type === "despesa").reduce((s, e) => s + e.valor, 0);
+    const port = E.filter(e => e.especie === esp && e.type === "porta").reduce((s, e) => s + e.valor, 0);
+    const jan = E.filter(e => e.especie === esp && e.type === "janela").reduce((s, e) => s + e.valor, 0);
+    const qtdPort = E.filter(e => e.especie === esp && e.type === "porta").reduce((s, e) => s + (e.qtd || 0), 0);
+    const qtdJan = E.filter(e => e.especie === esp && e.type === "janela").reduce((s, e) => s + (e.qtd || 0), 0);
     const receita = port + jan;
     const lucro = receita - desp;
     const totalQtd = qtdPort + qtdJan;
@@ -749,28 +779,28 @@ function App() {
     return { desp, port, jan, receita, lucro, qtdPort, qtdJan, totalQtd, custoUnit, margemPct, retornoPct, lucroPorPorta };
   }
 
-  const totalDesp = data.entries.filter(e => e.type === "despesa").reduce((s, e) => s + e.valor, 0);
-  const totalPort = data.entries.filter(e => e.type === "porta").reduce((s, e) => s + e.valor, 0);
-  const totalJan = data.entries.filter(e => e.type === "janela").reduce((s, e) => s + e.valor, 0);
+  const totalDesp = E.filter(e => e.type === "despesa").reduce((s, e) => s + e.valor, 0);
+  const totalPort = E.filter(e => e.type === "porta").reduce((s, e) => s + e.valor, 0);
+  const totalJan = E.filter(e => e.type === "janela").reduce((s, e) => s + e.valor, 0);
   const totalReceita = totalPort + totalJan;
   const lucroGeral = totalReceita - totalDesp;
-  const totalQtdGeralPort = data.entries.filter(e => e.type === "porta").reduce((s, e) => s + (e.qtd || 0), 0);
-  const totalQtdGeralJan = data.entries.filter(e => e.type === "janela").reduce((s, e) => s + (e.qtd || 0), 0);
+  const totalQtdGeralPort = E.filter(e => e.type === "porta").reduce((s, e) => s + (e.qtd || 0), 0);
+  const totalQtdGeralJan = E.filter(e => e.type === "janela").reduce((s, e) => s + (e.qtd || 0), 0);
   const totalQtdGeral = totalQtdGeralPort + totalQtdGeralJan;
 
   const totalEntriesInTab = useMemo(() => {
     if (!especieAtiva) return 0;
-    return data.entries.filter(e =>
+    return E.filter(e =>
       e.especie === especieAtiva &&
       e.type === (subTab === "portas" ? "porta" : subTab === "janelas" ? "janela" : "despesa") &&
       (subTab !== "despesas" || !filterType || e.expType === filterType) &&
       (!filterDoorName || e.nome === filterDoorName)
     ).length;
-  }, [data.entries, especieAtiva, subTab, filterType, filterDoorName]);
+  }, [E, especieAtiva, subTab, filterType, filterDoorName]);
 
   const entriesAtivas = useMemo(() => {
     if (!especieAtiva) return [];
-    const filtered = data.entries
+    const filtered = E
       .filter(e => e.especie === especieAtiva && e.type === (subTab === "portas" ? "porta" : subTab === "janelas" ? "janela" : "despesa")
         && (subTab !== "despesas" || !filterType || e.expType === filterType)
         && (!filterDoorName || e.nome === filterDoorName))
@@ -785,7 +815,7 @@ function App() {
       (e.marceneiro || "").toLowerCase().includes(term) ||
       String(e.valor).includes(term)
     );
-  }, [data.entries, especieAtiva, subTab, filterType, filterDoorName, searchText]);
+  }, [E, especieAtiva, subTab, filterType, filterDoorName, searchText]);
 
   const filteredTotal = useMemo(() => {
     return entriesAtivas.reduce((sum, e) => sum + (e.valor || 0), 0);
@@ -813,6 +843,188 @@ function App() {
       totalQtd, custoUnit, margemPct, retornoPct, lucroPorPorta, lucroPorJanela
     };
   }, [statsAtiva, productFilter]);
+
+  // ---- custo por tipo de despesa da espécie ativa ----
+  const custoPorTipo = especieAtiva ? EXPENSE_TYPES.map(t => {
+    const itens = E.filter(e => e.especie === especieAtiva && e.type === "despesa" && (e.expType || "outro") === t.id);
+    return { ...t, valor: itens.reduce((acc, e) => acc + (e.valor || 0), 0), m3: itens.reduce((acc, e) => acc + (e.volM3 || 0), 0) };
+  }).filter(t => t.valor > 0) : [];
+
+  function textoResumo(esp) {
+    const st = stats(esp);
+    const tipos = EXPENSE_TYPES.map(t => {
+      const itens = E.filter(e => e.especie === esp && e.type === "despesa" && (e.expType || "outro") === t.id);
+      return { ...t, valor: itens.reduce((a, e) => a + (e.valor || 0), 0), m3: itens.reduce((a, e) => a + (e.volM3 || 0), 0) };
+    }).filter(t => t.valor > 0);
+    const L = [];
+    L.push(`*${esp}*`);
+    if (periodoAtivo) L.push(`📅 Período: ${periodoLabel(periodo)}`);
+    L.push("");
+    L.push(`🔻 *Despesas: ${formatBRL(st.desp)}*`);
+    tipos.forEach(t => L.push(`   ${t.emoji} ${t.label}: ${formatBRL(t.valor)}${t.m3 > 0 ? ` (${formatM3(t.m3)} m³)` : ""}`));
+    L.push("");
+    L.push(`🚪 *Portas: ${formatBRL(st.port)}*${st.qtdPort > 0 ? ` (${st.qtdPort} un)` : ""}`);
+    L.push(`🪟 *Janelas: ${formatBRL(st.jan)}*${st.qtdJan > 0 ? ` (${st.qtdJan} un)` : ""}`);
+    L.push("");
+    L.push(st.lucro >= 0 ? `✅ *Lucro: ${formatBRL(st.lucro)}*` : `⚠️ *Prejuízo: ${formatBRL(Math.abs(st.lucro))}*`);
+    if (st.totalQtd > 0) {
+      L.push(`Custo por unidade: ${formatBRL(st.custoUnit)}`);
+      L.push(`Margem: ${st.margemPct.toFixed(1).replace(".", ",")}%`);
+    }
+    L.push("");
+    L.push(`_Emitido em ${new Date().toLocaleDateString("pt-BR")}_`);
+    return L.join("\n");
+  }
+
+  function imagemResumo(esp) {
+    const st = stats(esp);
+    const W = 900, PAD = 50;
+    const linhas = [];
+    linhas.push({ t: "titulo", txt: esp });
+    linhas.push({ t: "sub", txt: `Emitido em ${new Date().toLocaleDateString("pt-BR")}${periodoAtivo ? "  ·  Período: " + periodoLabel(periodo) : ""}` });
+    linhas.push({ t: "linha" });
+    linhas.push({ t: "row", l: "Despesas", r: formatBRL(st.desp), cor: "#b91c1c", bold: true });
+    EXPENSE_TYPES.forEach(tp => {
+      const itens = E.filter(e => e.especie === esp && e.type === "despesa" && (e.expType || "outro") === tp.id);
+      const v = itens.reduce((a, e) => a + (e.valor || 0), 0);
+      const m3 = itens.reduce((a, e) => a + (e.volM3 || 0), 0);
+      if (v > 0) linhas.push({ t: "row", l: `   ${tp.label}${m3 > 0 ? ` (${formatM3(m3)} m³)` : ""}`, r: formatBRL(v), cor: "#444" });
+    });
+    linhas.push({ t: "row", l: `Portas${st.qtdPort > 0 ? ` (${st.qtdPort} un)` : ""}`, r: formatBRL(st.port), cor: "#15803d", bold: true });
+    linhas.push({ t: "row", l: `Janelas${st.qtdJan > 0 ? ` (${st.qtdJan} un)` : ""}`, r: formatBRL(st.jan), cor: "#1d4ed8", bold: true });
+    linhas.push({ t: "linha" });
+    linhas.push({ t: "total", l: st.lucro >= 0 ? "LUCRO" : "PREJUÍZO", r: formatBRL(Math.abs(st.lucro)), cor: st.lucro >= 0 ? "#15803d" : "#b91c1c" });
+    if (st.totalQtd > 0) {
+      linhas.push({ t: "row", l: "Custo por unidade", r: formatBRL(st.custoUnit), cor: "#444" });
+      linhas.push({ t: "row", l: "Margem", r: `${st.margemPct.toFixed(1).replace(".", ",")}%`, cor: "#444" });
+    }
+    const alt = { titulo: 60, sub: 40, linha: 24, row: 46, total: 64 };
+    const H = PAD * 2 + linhas.reduce((a, x) => a + alt[x.t], 0);
+    const c = document.createElement("canvas");
+    c.width = W; c.height = H;
+    const g = c.getContext("2d");
+    g.fillStyle = "#ffffff"; g.fillRect(0, 0, W, H);
+    let y = PAD;
+    const F = "system-ui, -apple-system, Roboto, sans-serif";
+    linhas.forEach(x => {
+      const h = alt[x.t];
+      if (x.t === "titulo") { g.fillStyle = "#111"; g.font = `800 40px ${F}`; g.textAlign = "left"; g.fillText(x.txt, PAD, y + 42); }
+      else if (x.t === "sub") { g.fillStyle = "#666"; g.font = `400 22px ${F}`; g.textAlign = "left"; g.fillText(x.txt, PAD, y + 28); }
+      else if (x.t === "linha") { g.strokeStyle = "#ccc"; g.lineWidth = 2; g.beginPath(); g.moveTo(PAD, y + 12); g.lineTo(W - PAD, y + 12); g.stroke(); }
+      else {
+        const big = x.t === "total";
+        g.font = `${big || x.bold ? 700 : 400} ${big ? 34 : 27}px ${F}`;
+        g.fillStyle = big ? x.cor : "#222"; g.textAlign = "left"; g.fillText(x.l, PAD, y + h - 14);
+        g.fillStyle = x.cor; g.textAlign = "right"; g.fillText(x.r, W - PAD, y + h - 14);
+      }
+      y += h;
+    });
+    return new Promise(res => c.toBlob(res, "image/png"));
+  }
+
+  async function enviarResumo(tipo) {
+    setShowShareMenu(false);
+    try {
+      if (tipo === "texto") await compartilharTexto(textoResumo(especieAtiva));
+      else {
+        const blob = await imagemResumo(especieAtiva);
+        await compartilharArquivo(blob, `${especieAtiva}-resumo.png`, `Resumo ${especieAtiva}`);
+      }
+    } catch (e) {
+      if (!/cancel/i.test(String(e && e.message))) alert("Erro ao compartilhar");
+    }
+  }
+
+  function renderPeriodo() {
+    const opc = (label, novo, ativo) => (
+      <button key={label} style={{...s.perChip, ...(ativo ? s.perChipOn : {})}}
+        onClick={() => { setPeriodo(p => ({ ...p, ...novo })); if (novo.tipo !== "intervalo") setShowPeriodo(false); }}>{label}</button>
+    );
+    return (
+      <div style={{marginBottom:12}}>
+        <button style={{...s.perBar, ...(periodoAtivo ? s.perBarOn : {})}} onClick={() => setShowPeriodo(v => !v)}>
+          <span>📅 Período: <strong>{periodoLabel(periodo)}</strong></span>
+          <span style={{opacity:0.7}}>{showPeriodo ? "▲" : "▼"}</span>
+        </button>
+        {periodoAtivo && !showPeriodo && (
+          <button style={s.perLimpar} onClick={() => setPeriodo(p => ({ ...p, tipo: "tudo" }))}>✕ Mostrar tudo</button>
+        )}
+        {showPeriodo && (
+          <div style={s.perPanel}>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {opc("Tudo", { tipo: "tudo" }, periodo.tipo === "tudo")}
+              {opc("Este mês", { tipo: "mes", mes: mesAtual(0) }, periodo.tipo === "mes" && periodo.mes === mesAtual(0))}
+              {opc("Mês passado", { tipo: "mes", mes: mesAtual(-1) }, periodo.tipo === "mes" && periodo.mes === mesAtual(-1))}
+              {opc("Entre datas", { tipo: "intervalo" }, periodo.tipo === "intervalo")}
+            </div>
+            <div style={{marginTop:10}}>
+              <span style={s.perLabel}>Escolher mês</span>
+              <input type="month" style={s.perInput} value={periodo.tipo === "mes" ? periodo.mes : ""}
+                onChange={e => { if (e.target.value) { setPeriodo(p => ({ ...p, tipo: "mes", mes: e.target.value })); setShowPeriodo(false); } }} />
+            </div>
+            {periodo.tipo === "intervalo" && (
+              <div style={{display:"flex",gap:8,marginTop:10}}>
+                <div style={{flex:1}}>
+                  <span style={s.perLabel}>De</span>
+                  <input type="date" style={s.perInput} value={periodo.de} onChange={e => setPeriodo(p => ({ ...p, de: e.target.value }))} />
+                </div>
+                <div style={{flex:1}}>
+                  <span style={s.perLabel}>Até</span>
+                  <input type="date" style={s.perInput} value={periodo.ate} onChange={e => setPeriodo(p => ({ ...p, ate: e.target.value }))} />
+                </div>
+              </div>
+            )}
+            {periodo.tipo === "intervalo" && (
+              <button style={s.perOk} onClick={() => setShowPeriodo(false)}>Aplicar</button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderCusto(st) {
+    const vendeu = st.totalQtd > 0;
+    const precoMedioPorta = st.qtdPort > 0 ? st.port / st.qtdPort : 0;
+    const precoMedioJan = st.qtdJan > 0 ? st.jan / st.qtdJan : 0;
+    const faltam = st.lucro < 0 ? Math.abs(st.lucro) : 0;
+    return (
+      <div style={s.custoCard}>
+        <div style={s.custoTitulo}>💰 Custo por unidade</div>
+        {custoPorTipo.length === 0 && <div style={s.custoVazio}>Nenhuma despesa lançada{periodoAtivo ? " neste período" : ""}.</div>}
+        {custoPorTipo.map(t => (
+          <div key={t.id} style={s.custoRow}>
+            <span style={s.custoLbl}>{t.emoji} {t.label}{t.m3 > 0 ? ` · ${formatM3(t.m3)} m³` : ""}</span>
+            <span style={s.custoVal}>{formatBRL(t.valor)}{vendeu && <span style={s.custoUn}> · {formatBRL(t.valor / st.totalQtd)}/un</span>}</span>
+          </div>
+        ))}
+        {vendeu ? (
+          <>
+            <div style={{...s.custoRow, ...s.custoDestaque}}>
+              <span style={{color:"#fff",fontWeight:800}}>Custo de cada peça</span>
+              <span style={{color:"#fbbf24",fontWeight:900,fontSize:17}}>{formatBRL(st.custoUnit)}</span>
+            </div>
+            <div style={{...s.custoDica}}>Preço mínimo para não ter prejuízo: <strong style={{color:"#fbbf24"}}>{formatBRL(st.custoUnit)}</strong> por peça ({st.totalQtd} un vendidas)</div>
+            {precoMedioPorta > 0 && (
+              <div style={s.custoRow}><span style={s.custoLbl}>🚪 Preço médio da porta</span>
+                <span style={{...s.custoVal, color: precoMedioPorta >= st.custoUnit ? "#22c55e" : "#ff6b6b"}}>{formatBRL(precoMedioPorta)}</span></div>
+            )}
+            {precoMedioJan > 0 && (
+              <div style={s.custoRow}><span style={s.custoLbl}>🪟 Preço médio da janela</span>
+                <span style={{...s.custoVal, color: precoMedioJan >= st.custoUnit ? "#22c55e" : "#ff6b6b"}}>{formatBRL(precoMedioJan)}</span></div>
+            )}
+            <div style={s.custoRow}><span style={s.custoLbl}>{st.lucro >= 0 ? "Lucro" : "Prejuízo"} por peça</span>
+              <span style={{...s.custoVal, color: st.lucro >= 0 ? "#22c55e" : "#ff6b6b"}}>{formatBRL(Math.abs(st.lucro) / st.totalQtd)}</span></div>
+          </>
+        ) : (
+          st.desp > 0 && <div style={s.custoDica}>Nenhuma porta ou janela vendida ainda{periodoAtivo ? " neste período" : ""}. O custo por peça aparece quando lançar as vendas.</div>
+        )}
+        {faltam > 0 && st.desp > 0 && (
+          <div style={s.custoFalta}>Faltam <strong>{formatBRL(faltam)}</strong> em vendas para empatar</div>
+        )}
+      </div>
+    );
+  }
 
   if (loading) return <div style={s.loadWrap}><div style={s.spinner} /></div>;
 
@@ -1096,7 +1308,7 @@ function App() {
             </span>
           )}
         </div>
-        <BarChart desp={displayStats.desp} receita={displayStats.receita} lucro={displayStats.lucro} theme={theme} />
+
         <div style={s.detailRow2}>
           <button style={{...s.detailTabBtn, ...(subTab==="despesas"?{borderBottom:"2px solid #fb923c"}:{})}}
             onClick={()=>{setSubTab("despesas");setFilterDoorName(null);setFilterType(null);setSearchText("");}}>
@@ -1117,6 +1329,8 @@ function App() {
       </div>
 
       <div style={s.page}>
+        {renderPeriodo()}
+        {renderCusto(displayStats)}
         {totalEntriesInTab > 5 && (
           <div style={{marginBottom:10}}>
             <input
@@ -1164,9 +1378,18 @@ function App() {
           })()
         )}
       </div>
+      {showShareMenu && (
+        <div style={s.shareMenu}>
+          <div style={{color:"#9ca3af",fontSize:12,fontWeight:700,marginBottom:8}}>ENVIAR RESUMO DE {especieAtiva}</div>
+          <button style={s.shareOpt} onClick={()=>enviarResumo("texto")}>📝 Texto (WhatsApp)</button>
+          <button style={s.shareOpt} onClick={()=>enviarResumo("imagem")}>🖼️ Imagem</button>
+          <button style={{...s.shareOpt, background:"transparent", color:"#9ca3af"}} onClick={()=>setShowShareMenu(false)}>Cancelar</button>
+        </div>
+      )}
       <div style={s.fabAreaRight}>
         <div style={s.fabMiniRow}>
           <button style={s.fabMiniBtn} onClick={openTrash} title="Lixeira">🗑️{lixeira.length>0 && <span style={s.trashBadge}>{lixeira.length}</span>}</button>
+          <button style={s.fabMiniBtn} onClick={()=>setShowShareMenu(v=>!v)} title="Enviar resumo">📤</button>
           <button style={s.fabMiniBtn} onClick={exportPDFEspecie} title="Exportar PDF">📄</button>
           <button style={s.fabMiniBtn} onClick={()=>setShowThemePicker(p=>!p)} title="Cor">🎨</button>
         </div>
@@ -1233,10 +1456,22 @@ function App() {
 
       {saved && <div style={s.toast}>✅ Salvo!</div>}
 
+      {data.entries.length > 0 && (Date.now() - lastBackup) > BACKUP_DIAS * 86400000 && (
+        <div style={s.backupAviso}>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:800}}>⚠️ {lastBackup ? `Faz ${Math.floor((Date.now()-lastBackup)/86400000)} dias sem backup` : "Você ainda não fez backup"}</div>
+            <div style={{fontSize:12,opacity:0.85,marginTop:2}}>Se o celular quebrar, os dados se perdem.</div>
+          </div>
+          <button style={s.backupBtn} onClick={exportBackup}>💾 Fazer agora</button>
+        </div>
+      )}
+
+      <div style={{padding:"14px 14px 0"}}>{renderPeriodo()}</div>
+
       {mainTab==="especies" && (
         <div style={s.listPage}>
           {especies.length===0 ? (
-            <div style={s.empty}>Nenhuma espécie cadastrada.<br/>Toque em <b>+</b> para começar.</div>
+            <div style={s.empty}>{periodoAtivo && data.entries.length > 0 ? <>Nenhum lançamento em <b>{periodoLabel(periodo)}</b>.</> : <>Nenhuma espécie cadastrada.<br/>Toque em <b>+</b> para começar.</>}</div>
           ) : especies.map(esp => {
             const st = stats(esp);
             return (
@@ -1271,7 +1506,7 @@ function App() {
 
           <div style={{display:"flex",gap:10,marginBottom:16}}>
             <button style={{flex:1,background:"#1f2937",border:"1.5px solid #374151",borderRadius:12,padding:"12px",color:"#e5e7eb",fontWeight:700,fontSize:13,cursor:"pointer"}}
-              onClick={exportBackup}>💾 Exportar Backup</button>
+              onClick={exportBackup}>💾 Exportar Backup<div style={{fontSize:10,color:"#6b7280",fontWeight:600,marginTop:3}}>{lastBackup ? `Último: ${new Date(lastBackup).toLocaleDateString("pt-BR")}` : "Nunca feito"}</div></button>
             <button style={{flex:1,background:"#1f2937",border:"1.5px solid #374151",borderRadius:12,padding:"12px",color:"#e5e7eb",fontWeight:700,fontSize:13,cursor:"pointer"}}
               onClick={()=>fileInputRef.current?.click()}>📁 Restaurar Backup</button>
             <input ref={fileInputRef} type="file" accept=".json" style={{display:"none"}} onChange={e => { if(e.target.files[0]) importBackup(e.target.files[0]); e.target.value=""; }} />
@@ -1340,7 +1575,7 @@ const s = {
   backBtn:{background:"none",border:"none",color:"#fff",fontSize:30,cursor:"pointer",padding:"0 6px 0 0",lineHeight:1},
   headerTitle:{fontSize:18,fontWeight:800,color:"#fff"},
   toast:{background:"#166534",color:"#fff",margin:"12px 14px 0",borderRadius:10,padding:"10px 16px",fontWeight:700,textAlign:"center",fontSize:15},
-  listPage:{padding:"14px 14px 0"},
+  listPage:{padding:"0 14px 0"},
   page:{padding:"14px 14px 0"},
   especieCard:{width:"100%",background:"#1f2937",border:"none",borderRadius:16,padding:"16px",marginBottom:12,textAlign:"left",cursor:"pointer",boxShadow:"0 2px 8px rgba(0,0,0,0.3)"},
   cardTop:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10},
@@ -1389,6 +1624,29 @@ const s = {
   trashRestore:{flex:1,padding:"10px",borderRadius:10,border:"1px solid #14532d",background:"#0a1f0a",color:"#4ade80",fontWeight:700,fontSize:14,cursor:"pointer"},
   trashDelete:{flex:1,padding:"10px",borderRadius:10,border:"1px solid #7f1d1d",background:"#2a1010",color:"#fca5a5",fontWeight:700,fontSize:14,cursor:"pointer"},
   trashEmpty:{width:"100%",marginTop:8,padding:"12px",borderRadius:12,border:"1px solid #4b5563",background:"transparent",color:"#9ca3af",fontWeight:700,fontSize:14,cursor:"pointer"},
+  perBar:{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"#1f2937",border:"1px solid #374151",borderRadius:12,padding:"10px 14px",color:"#d1d5db",fontSize:14,cursor:"pointer"},
+  perBarOn:{background:"#1e3a5f",border:"1px solid #3b82f6",color:"#bfdbfe"},
+  perLimpar:{marginTop:6,background:"transparent",border:"none",color:"#93c5fd",fontSize:13,fontWeight:700,cursor:"pointer",padding:"2px 4px"},
+  perPanel:{background:"#1f2937",border:"1px solid #374151",borderRadius:12,padding:12,marginTop:6},
+  perChip:{background:"#111827",border:"1px solid #374151",borderRadius:20,padding:"8px 14px",color:"#d1d5db",fontSize:13,fontWeight:700,cursor:"pointer"},
+  perChipOn:{background:"#4f46e5",border:"1px solid #6366f1",color:"#fff"},
+  perLabel:{display:"block",fontSize:11,color:"#9ca3af",fontWeight:700,marginBottom:4},
+  perInput:{width:"100%",padding:"9px 10px",borderRadius:10,border:"1px solid #374151",background:"#111827",color:"#f9fafb",fontSize:14,boxSizing:"border-box",colorScheme:"dark"},
+  perOk:{width:"100%",marginTop:10,padding:"10px",borderRadius:10,border:"none",background:"#4f46e5",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"},
+  custoCard:{background:"#1f2937",border:"1px solid #374151",borderRadius:14,padding:"12px 14px",marginBottom:12},
+  custoTitulo:{color:"#fbbf24",fontWeight:800,fontSize:14,marginBottom:8},
+  custoVazio:{color:"#6b7280",fontSize:13},
+  custoRow:{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,padding:"5px 0"},
+  custoLbl:{color:"#9ca3af",fontSize:13,fontWeight:600},
+  custoVal:{color:"#e5e7eb",fontSize:14,fontWeight:800,textAlign:"right"},
+  custoUn:{color:"#9ca3af",fontSize:12,fontWeight:600},
+  custoDestaque:{borderTop:"1px solid #374151",marginTop:6,paddingTop:10},
+  custoDica:{color:"#9ca3af",fontSize:12,margin:"2px 0 6px"},
+  custoFalta:{marginTop:8,background:"#2a1010",border:"1px solid #7f1d1d",color:"#fca5a5",borderRadius:10,padding:"8px 12px",fontSize:13},
+  backupAviso:{display:"flex",alignItems:"center",gap:10,background:"#3a2a07",border:"1px solid #a16207",color:"#fde68a",borderRadius:12,margin:"12px 14px 0",padding:"10px 12px",fontSize:14},
+  backupBtn:{background:"#ca8a04",border:"none",borderRadius:10,padding:"9px 12px",color:"#111",fontWeight:800,fontSize:13,cursor:"pointer",whiteSpace:"nowrap"},
+  shareMenu:{position:"fixed",left:14,right:14,bottom:20,background:"#1f2937",border:"1px solid #4b5563",borderRadius:16,padding:14,zIndex:40,boxShadow:"0 8px 30px rgba(0,0,0,0.6)"},
+  shareOpt:{display:"block",width:"100%",textAlign:"left",background:"#111827",border:"1px solid #374151",borderRadius:12,padding:"13px 14px",color:"#f9fafb",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:8},
   fabMiniRow:{display:"flex",flexDirection:"column",gap:6},
   fabMiniBtn:{position:"relative",background:"rgba(31,41,55,0.95)",border:"1px solid #4b5563",borderRadius:"50%",width:36,height:36,fontSize:15,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 8px rgba(0,0,0,0.4)"},
   delRow:{display:"flex",gap:5},
@@ -1447,6 +1705,25 @@ async function compartilharNoApp(blob, fileName, title) {
   await Filesystem.writeFile({ path: fileName, data, directory: "CACHE" });
   const { uri } = await Filesystem.getUri({ path: fileName, directory: "CACHE" });
   await Share.share({ title, files: [uri] });
+}
+
+async function compartilharTexto(texto) {
+  if (isApp()) { await window.Capacitor.Plugins.Share.share({ text: texto }); return; }
+  if (navigator.share) { try { await navigator.share({ text: texto }); return; } catch (e) { if (e && e.name === "AbortError") return; } }
+  window.open("https://wa.me/?text=" + encodeURIComponent(texto), "_blank");
+}
+async function compartilharArquivo(blob, fileName, title) {
+  if (isApp()) { await compartilharNoApp(blob, fileName, title); return true; }
+  const file = new File([blob], fileName, { type: blob.type });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title }); return true; } catch (e) { if (e && e.name === "AbortError") return false; }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = fileName; a.style.display = "none";
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+  return true;
 }
 
 function compartilharPDFPortas(doc, fileName) {
